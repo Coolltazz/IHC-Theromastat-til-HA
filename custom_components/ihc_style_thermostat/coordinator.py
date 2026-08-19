@@ -1,0 +1,326 @@
+"""Core state machine for a single room, modeled on a Schneider Electric IHC
+dual-sensor thermostat function block: room + floor regulation with
+selectable priority, hysteresis, pulse (duty-cycle) heating in the
+maintenance zone, frost/night/guest setback, and max-temperature safety.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+
+from .const import (
+    CONF_FLOOR_TEMP_SENSOR,
+    CONF_HEATER_SWITCH,
+    CONF_HOUSE_MODE_ENTITY,
+    CONF_ROOM_TEMP_SENSOR,
+    CONF_WINDOW_SENSOR,
+    DEFAULT_WINDOW_DELAY_MINUTES,
+    HOUSE_MODE_MAP,
+    MODE_ALARM,
+    MODE_FROST,
+    MODE_GUEST,
+    MODE_NIGHT,
+    MODE_OCCUPIED,
+    MODE_OFF,
+    MODE_UNOCCUPIED,
+    MODE_WINDOW_OPEN,
+    OPTION_WINDOW_DELAY_MINUTES,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+UNAVAILABLE = (None, "unknown", "unavailable", "")
+
+
+class RoomHeatingCoordinator:
+    """Owns the heat-call decision for one room (one config entry)."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self.entry = entry
+
+        self.room_temp_sensor: str = entry.data[CONF_ROOM_TEMP_SENSOR]
+        self.floor_temp_sensor: str | None = entry.data.get(CONF_FLOOR_TEMP_SENSOR)
+        self.heater_switch: str = entry.data[CONF_HEATER_SWITCH]
+        self.window_sensor: str | None = entry.data.get(CONF_WINDOW_SENSOR)
+        self.house_mode_entity: str | None = entry.data.get(CONF_HOUSE_MODE_ENTITY)
+        self.window_delay_minutes: float = entry.options.get(
+            OPTION_WINDOW_DELAY_MINUTES, DEFAULT_WINDOW_DELAY_MINUTES
+        )
+
+        self._numbers: dict[str, Any] = {}
+        self._selects: dict[str, Any] = {}
+        self._sensors: dict[str, Any] = {}
+
+        self._room_satisfied: bool | None = None
+        self._floor_satisfied: bool | None = None
+        self._last_heat_call: bool | None = None
+
+        self._pulse_phase: str | None = None  # None / "on" / "off"
+        self._pulse_cancel = None
+
+        self._window_open_since = None
+        self._window_cancel = None
+
+        self._remove_listener = None
+
+    # -- entity registration, called from each platform's async_added_to_hass --
+    def register_number(self, key: str, entity: Any) -> None:
+        self._numbers[key] = entity
+
+    def register_select(self, key: str, entity: Any) -> None:
+        self._selects[key] = entity
+
+    def register_sensor(self, key: str, entity: Any) -> None:
+        self._sensors[key] = entity
+
+    def _number(self, key: str) -> float | None:
+        entity = self._numbers.get(key)
+        return entity.native_value if entity else None
+
+    def _select(self, key: str) -> str | None:
+        entity = self._selects.get(key)
+        return entity.current_option if entity else None
+
+    # -- external entities (not owned by this integration) --
+    def _get_float(self, entity_id: str | None) -> float | None:
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in UNAVAILABLE:
+            return None
+        try:
+            return float(state.state)
+        except (ValueError, TypeError):
+            return None
+
+    def _get_str(self, entity_id: str | None) -> str | None:
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        return state.state
+
+    async def async_setup_listeners(self) -> None:
+        entities = [self.room_temp_sensor]
+        if self.floor_temp_sensor:
+            entities.append(self.floor_temp_sensor)
+        if self.house_mode_entity:
+            entities.append(self.house_mode_entity)
+        if self.window_sensor:
+            entities.append(self.window_sensor)
+        self._remove_listener = async_track_state_change_event(
+            self.hass, entities, self._handle_external_change
+        )
+
+    def async_unload(self) -> None:
+        if self._remove_listener:
+            self._remove_listener()
+            self._remove_listener = None
+        if self._pulse_cancel:
+            self._pulse_cancel()
+            self._pulse_cancel = None
+        if self._window_cancel:
+            self._window_cancel()
+            self._window_cancel = None
+
+    @callback
+    def _handle_external_change(self, event: Event) -> None:
+        if event.data["entity_id"] == self.window_sensor:
+            self._on_window_change(event.data["new_state"])
+        self.hass.async_create_task(self.async_evaluate())
+
+    def _on_window_change(self, new_state) -> None:
+        if self._window_cancel:
+            self._window_cancel()
+            self._window_cancel = None
+        if new_state is not None and new_state.state == "on":
+            self._window_cancel = async_call_later(
+                self.hass, self.window_delay_minutes * 60, self._window_delay_elapsed
+            )
+        else:
+            self._window_open_since = None
+
+    @callback
+    def _window_delay_elapsed(self, _now) -> None:
+        self._window_open_since = _now
+        self._window_cancel = None
+        self.hass.async_create_task(self.async_evaluate())
+
+    # -- pulse (duty-cycle) heating --
+    def _cancel_pulse(self) -> None:
+        if self._pulse_cancel:
+            self._pulse_cancel()
+            self._pulse_cancel = None
+        self._pulse_phase = None
+
+    def _schedule_pulse_timer(self) -> None:
+        if self._pulse_cancel:
+            self._pulse_cancel()
+        minutes_key = (
+            "pulsvarme_varme_on_min" if self._pulse_phase == "on" else "pulsvarme_varme_off_min"
+        )
+        minutes = self._number(minutes_key) or 20
+        self._pulse_cancel = async_call_later(self.hass, minutes * 60, self._pulse_timer_elapsed)
+
+    @callback
+    def _pulse_timer_elapsed(self, _now) -> None:
+        self._pulse_cancel = None
+        self.hass.async_create_task(self.async_evaluate(phase_elapsed=True))
+
+    # -- mode / setpoint resolution (mirrors the AppDaemon implementation) --
+    def _determine_mode(self, room_temp: float | None, floor_temp: float | None) -> str:
+        if room_temp is None and floor_temp is None:
+            return MODE_ALARM
+
+        local_mode = self._select("lokal_tilstand")
+        if local_mode == "Tvunget fra":
+            return MODE_OFF
+        if local_mode == "Tvunget frostsikring":
+            return MODE_FROST
+
+        house_mode = self._get_str(self.house_mode_entity) if self.house_mode_entity else "Beboet"
+
+        if local_mode == "Tvunget nedsænkning" and house_mode == "Beboet":
+            base_mode = MODE_NIGHT
+        else:
+            base_mode = HOUSE_MODE_MAP.get(house_mode, MODE_UNOCCUPIED)
+
+        if (
+            self.window_sensor
+            and self._get_str(self.window_sensor) == "on"
+            and self._window_open_since is not None
+            and base_mode != MODE_OFF
+        ):
+            return MODE_WINDOW_OPEN
+
+        return base_mode
+
+    def _setpoints_for_mode(self, mode: str) -> tuple[float | None, float | None]:
+        if mode in (MODE_OFF, MODE_ALARM):
+            return None, None
+        if mode == MODE_OCCUPIED:
+            room_sp = self._number("setpunkt_rum_beboet")
+            floor_sp = self._number("setpunkt_gulv_beboet")
+        elif mode == MODE_UNOCCUPIED:
+            room_sp = floor_sp = self._number("setpunkt_ubeboet")
+        elif mode in (MODE_GUEST, MODE_NIGHT):
+            room_sp = floor_sp = self._number("setpunkt_gaest_nat")
+        else:  # MODE_FROST, MODE_WINDOW_OPEN
+            room_sp = floor_sp = self._number("setpunkt_frost")
+
+        max_room = self._number("max_temp_rum")
+        max_floor = self._number("max_temp_gulv")
+        if room_sp is not None and max_room is not None:
+            room_sp = min(room_sp, max_room)
+        if floor_sp is not None and max_floor is not None:
+            floor_sp = min(floor_sp, max_floor)
+        return room_sp, floor_sp
+
+    @staticmethod
+    def _hysteresis_satisfied(
+        temp: float | None, setpoint: float | None, band: float, previous: bool | None
+    ) -> bool:
+        if temp is None or setpoint is None:
+            return previous if previous is not None else True
+        if temp >= setpoint + band:
+            return True
+        if temp <= setpoint - band:
+            return False
+        return previous if previous is not None else (temp >= setpoint)
+
+    # -- main evaluation --
+    async def async_evaluate(self, phase_elapsed: bool = False) -> None:
+        room_temp = self._get_float(self.room_temp_sensor)
+        floor_temp = self._get_float(self.floor_temp_sensor) if self.floor_temp_sensor else None
+
+        mode = self._determine_mode(room_temp, floor_temp)
+        room_sp, floor_sp = self._setpoints_for_mode(mode)
+        regulation = self._select("regulering")
+        priority = self._select("prioritet")
+        band = self._number("hysterese") or 0.3
+
+        heat_call = False
+        status_extra = ""
+
+        if mode in (MODE_OFF, MODE_ALARM):
+            self._cancel_pulse()
+            heat_call = False
+        else:
+            self._room_satisfied = self._hysteresis_satisfied(
+                room_temp, room_sp, band, self._room_satisfied
+            )
+            self._floor_satisfied = self._hysteresis_satisfied(
+                floor_temp, floor_sp, band, self._floor_satisfied
+            )
+
+            if regulation == "Gulv":
+                target_satisfied = self._floor_satisfied
+            elif regulation == "Rum":
+                target_satisfied = self._room_satisfied
+            else:  # "Rum og gulv"
+                if priority == "Begge temperaturer opfyldt":
+                    target_satisfied = self._room_satisfied and self._floor_satisfied
+                else:
+                    target_satisfied = self._room_satisfied or self._floor_satisfied
+
+            max_room = self._number("max_temp_rum")
+            max_floor = self._number("max_temp_gulv")
+            max_blocked = (
+                max_room is not None and room_temp is not None and room_temp >= max_room
+            ) or (max_floor is not None and floor_temp is not None and floor_temp >= max_floor)
+
+            if max_blocked:
+                self._cancel_pulse()
+                heat_call = False
+                status_extra = " (Max temp nået)"
+            elif not target_satisfied:
+                self._cancel_pulse()
+                heat_call = True
+            else:
+                pulsvarme = self._select("pulsvarme")
+                if pulsvarme != "Aktiveret":
+                    self._cancel_pulse()
+                    heat_call = False
+                else:
+                    if self._pulse_phase is None:
+                        self._pulse_phase = "on"
+                        self._schedule_pulse_timer()
+                    elif phase_elapsed:
+                        self._pulse_phase = "off" if self._pulse_phase == "on" else "on"
+                        self._schedule_pulse_timer()
+                    heat_call = self._pulse_phase == "on"
+                    status_extra = f" (Pulsvarme: {self._pulse_phase.upper()})"
+
+        if heat_call != self._last_heat_call:
+            await self.hass.services.async_call(
+                "switch",
+                "turn_on" if heat_call else "turn_off",
+                {"entity_id": self.heater_switch},
+                blocking=False,
+            )
+            self._last_heat_call = heat_call
+            _LOGGER.info(
+                "%s: heat_call -> %s (mode=%s, room=%s, floor=%s, room_sp=%s, floor_sp=%s)",
+                self.entry.title,
+                heat_call,
+                mode,
+                room_temp,
+                floor_temp,
+                room_sp,
+                floor_sp,
+            )
+
+        status_sensor = self._sensors.get("varme_tilstand")
+        if status_sensor:
+            status_sensor.async_update_state(f"{mode}{status_extra}", heat_call=heat_call)
+        for key, value in (("varme_setpunkt_rum", room_sp), ("varme_setpunkt_gulv", floor_sp)):
+            sensor = self._sensors.get(key)
+            if sensor and value is not None:
+                sensor.async_update_state(value)

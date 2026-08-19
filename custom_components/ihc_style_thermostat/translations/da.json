@@ -1,0 +1,57 @@
+{
+  "title": "IHC-stil rumtermostat",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tilføj et rum",
+        "description": "Tilslut sensorer og relæ for dette rum. Alle øvrige indstillinger (sætpunkter, hysterese, pulsvarme) oprettes som redigerbare entiteter bagefter.",
+        "data": {
+          "name": "Rumnavn",
+          "room_temp_sensor": "Rumtemperatur-sensor",
+          "floor_temp_sensor": "Gulvtemperatur-sensor (valgfri)",
+          "heater_switch": "Varme-relæ (switch)",
+          "window_sensor": "Vindue/dør-kontakt (valgfri)",
+          "house_mode_entity": "Husets tilstand (select, valgfri)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Dette relæ er allerede konfigureret."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Indstillinger",
+        "data": {
+          "window_delay_minutes": "Forsinkelse før varme afbrydes ved åbent vindue (minutter)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "setpunkt_rum_beboet": { "name": "Sætpunkt rum, beboet" },
+      "setpunkt_gulv_beboet": { "name": "Sætpunkt gulv, beboet" },
+      "setpunkt_ubeboet": { "name": "Sætpunkt, ubeboet" },
+      "setpunkt_gaest_nat": { "name": "Sætpunkt, gæst/nat" },
+      "setpunkt_frost": { "name": "Sætpunkt, frostsikring" },
+      "max_temp_rum": { "name": "Max temperatur, rum" },
+      "max_temp_gulv": { "name": "Max temperatur, gulv" },
+      "hysterese": { "name": "Hysterese" },
+      "pulsvarme_varme_on_min": { "name": "Pulsvarme, varme ON-varighed" },
+      "pulsvarme_varme_off_min": { "name": "Pulsvarme, varme OFF-varighed" }
+    },
+    "select": {
+      "regulering": { "name": "Reguleringsform" },
+      "prioritet": { "name": "Prioritet" },
+      "lokal_tilstand": { "name": "Lokal overstyring" },
+      "pulsvarme": { "name": "Pulsvarme" }
+    },
+    "sensor": {
+      "varme_tilstand": { "name": "Varme tilstand" },
+      "varme_setpunkt_rum": { "name": "Aktuelt sætpunkt, rum" },
+      "varme_setpunkt_gulv": { "name": "Aktuelt sætpunkt, gulv" }
+    }
+  }
+}

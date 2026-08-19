@@ -1,0 +1,57 @@
+{
+  "title": "IHC-style Room Thermostat",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a room",
+        "description": "Wire up the sensors and relay for this room. All other settings (setpoints, hysteresis, pulse heating) are created as editable entities afterwards.",
+        "data": {
+          "name": "Room name",
+          "room_temp_sensor": "Room temperature sensor",
+          "floor_temp_sensor": "Floor temperature sensor (optional)",
+          "heater_switch": "Heater relay switch",
+          "window_sensor": "Window/door contact sensor (optional)",
+          "house_mode_entity": "House mode select entity (optional)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This heater switch is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "window_delay_minutes": "Window-open delay before cutting heat (minutes)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "setpunkt_rum_beboet": { "name": "Setpoint room, occupied" },
+      "setpunkt_gulv_beboet": { "name": "Setpoint floor, occupied" },
+      "setpunkt_ubeboet": { "name": "Setpoint, unoccupied" },
+      "setpunkt_gaest_nat": { "name": "Setpoint, guest/night" },
+      "setpunkt_frost": { "name": "Setpoint, frost protection" },
+      "max_temp_rum": { "name": "Max temperature, room" },
+      "max_temp_gulv": { "name": "Max temperature, floor" },
+      "hysterese": { "name": "Hysteresis" },
+      "pulsvarme_varme_on_min": { "name": "Pulse heat ON duration" },
+      "pulsvarme_varme_off_min": { "name": "Pulse heat OFF duration" }
+    },
+    "select": {
+      "regulering": { "name": "Regulation mode" },
+      "prioritet": { "name": "Priority" },
+      "lokal_tilstand": { "name": "Local override" },
+      "pulsvarme": { "name": "Pulse heating" }
+    },
+    "sensor": {
+      "varme_tilstand": { "name": "Heating state" },
+      "varme_setpunkt_rum": { "name": "Active setpoint, room" },
+      "varme_setpunkt_gulv": { "name": "Active setpoint, floor" }
+    }
+  }
+}
