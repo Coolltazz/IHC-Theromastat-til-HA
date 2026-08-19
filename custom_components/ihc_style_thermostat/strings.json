@@ -4,15 +4,12 @@
     "step": {
       "user": {
         "title": "Add a room",
-        "description": "Wire up the sensors and relay for this room. All other settings (setpoints, hysteresis, pulse heating) are created as editable entities afterwards.",
+        "description": "Wire up the sensors and relay for this room. Optional extras (window sensor, house mode, outdoor sensor) and all other settings (setpoints, hysteresis, pulse heating) can be added afterwards via Configure / as editable entities.",
         "data": {
           "name": "Room name",
           "room_temp_sensor": "Room temperature sensor",
           "floor_temp_sensor": "Floor temperature sensor (optional)",
-          "heater_switch": "Heater relay switch",
-          "window_sensor": "Window/door contact sensor (optional)",
-          "house_mode_entity": "House mode select entity (optional)",
-          "outdoor_temp_entity": "Outdoor \"feels like\" temperature sensor (optional, for weather-compensated pulse heating)"
+          "heater_switch": "Heater relay switch"
         }
       }
     },
@@ -25,6 +22,9 @@
       "init": {
         "title": "Options",
         "data": {
+          "window_sensor": "Window/door contact sensor (optional)",
+          "house_mode_entity": "House mode select entity (optional)",
+          "outdoor_temp_entity": "Outdoor \"feels like\" temperature sensor (optional, for weather-compensated pulse heating)",
           "window_delay_minutes": "Window-open delay before cutting heat (minutes)"
         }
       }

@@ -2,6 +2,14 @@
 
 One config entry per room. All wiring is picked via entity selectors --
 no free-text entity IDs.
+
+Core wiring (name, room sensor, floor sensor, heater switch) is fixed at
+creation, in the "user" step, and stored in `entry.data`. Everything more
+likely to change your mind about later -- window/door contact, house-mode
+entity, outdoor "feels like" sensor, window delay -- lives in the options
+flow (`entry.options`), reachable any time from the integration's
+"Configure" button, so it can be added/changed on an existing room without
+recreating it.
 """
 
 from __future__ import annotations
@@ -44,15 +52,6 @@ STEP_USER_SCHEMA = vol.Schema(
         vol.Required(CONF_HEATER_SWITCH): EntitySelector(
             EntitySelectorConfig(domain=["switch", "input_boolean"])
         ),
-        vol.Optional(CONF_WINDOW_SENSOR): EntitySelector(
-            EntitySelectorConfig(domain="binary_sensor")
-        ),
-        vol.Optional(CONF_HOUSE_MODE_ENTITY): EntitySelector(
-            EntitySelectorConfig(domain=["select", "input_select"])
-        ),
-        vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): EntitySelector(
-            EntitySelectorConfig(domain="sensor", device_class="temperature")
-        ),
     }
 )
 
@@ -87,14 +86,42 @@ class IhcStyleThermostatOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.options.get(
-            OPTION_WINDOW_DELAY_MINUTES, DEFAULT_WINDOW_DELAY_MINUTES
+        options = self.config_entry.options
+        schema_dict: dict[Any, Any] = {}
+
+        window_sensor_selector = EntitySelector(EntitySelectorConfig(domain="binary_sensor"))
+        if options.get(CONF_WINDOW_SENSOR):
+            schema_dict[
+                vol.Optional(CONF_WINDOW_SENSOR, default=options[CONF_WINDOW_SENSOR])
+            ] = window_sensor_selector
+        else:
+            schema_dict[vol.Optional(CONF_WINDOW_SENSOR)] = window_sensor_selector
+
+        house_mode_selector = EntitySelector(
+            EntitySelectorConfig(domain=["select", "input_select"])
         )
-        schema = vol.Schema(
-            {
-                vol.Required(OPTION_WINDOW_DELAY_MINUTES, default=current): NumberSelector(
-                    NumberSelectorConfig(min=1, max=120, step=1, mode=NumberSelectorMode.BOX)
-                ),
-            }
+        if options.get(CONF_HOUSE_MODE_ENTITY):
+            schema_dict[
+                vol.Optional(CONF_HOUSE_MODE_ENTITY, default=options[CONF_HOUSE_MODE_ENTITY])
+            ] = house_mode_selector
+        else:
+            schema_dict[vol.Optional(CONF_HOUSE_MODE_ENTITY)] = house_mode_selector
+
+        outdoor_temp_selector = EntitySelector(
+            EntitySelectorConfig(domain="sensor", device_class="temperature")
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        if options.get(CONF_OUTDOOR_TEMP_ENTITY):
+            schema_dict[
+                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=options[CONF_OUTDOOR_TEMP_ENTITY])
+            ] = outdoor_temp_selector
+        else:
+            schema_dict[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = outdoor_temp_selector
+
+        schema_dict[
+            vol.Required(
+                OPTION_WINDOW_DELAY_MINUTES,
+                default=options.get(OPTION_WINDOW_DELAY_MINUTES, DEFAULT_WINDOW_DELAY_MINUTES),
+            )
+        ] = NumberSelector(NumberSelectorConfig(min=1, max=120, step=1, mode=NumberSelectorMode.BOX))
+
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))

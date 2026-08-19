@@ -48,12 +48,15 @@ class RoomHeatingCoordinator:
         self.room_temp_sensor: str = entry.data[CONF_ROOM_TEMP_SENSOR]
         self.floor_temp_sensor: str | None = entry.data.get(CONF_FLOOR_TEMP_SENSOR)
         self.heater_switch: str = entry.data[CONF_HEATER_SWITCH]
-        self.window_sensor: str | None = entry.data.get(CONF_WINDOW_SENSOR)
-        self.house_mode_entity: str | None = entry.data.get(CONF_HOUSE_MODE_ENTITY)
-        self.outdoor_temp_entity: str | None = entry.data.get(CONF_OUTDOOR_TEMP_ENTITY)
-        self.window_delay_minutes: float = entry.options.get(
-            OPTION_WINDOW_DELAY_MINUTES, DEFAULT_WINDOW_DELAY_MINUTES
-        )
+        # window_sensor / house_mode_entity / outdoor_temp_entity live in
+        # entry.options (editable any time via "Configure"), but fall back to
+        # entry.data for rooms added before that move -- they were briefly
+        # part of the initial "user" step.
+        self.window_sensor: str | None = None
+        self.house_mode_entity: str | None = None
+        self.outdoor_temp_entity: str | None = None
+        self.window_delay_minutes: float = DEFAULT_WINDOW_DELAY_MINUTES
+        self._read_options()
 
         self._numbers: dict[str, Any] = {}
         self._selects: dict[str, Any] = {}
@@ -76,6 +79,32 @@ class RoomHeatingCoordinator:
         self._window_cancel = None
 
         self._remove_listener = None
+
+    def _read_options(self) -> None:
+        options = self.entry.options
+        data = self.entry.data
+        self.window_sensor = options.get(CONF_WINDOW_SENSOR) or data.get(CONF_WINDOW_SENSOR)
+        self.house_mode_entity = options.get(CONF_HOUSE_MODE_ENTITY) or data.get(
+            CONF_HOUSE_MODE_ENTITY
+        )
+        self.outdoor_temp_entity = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(
+            CONF_OUTDOOR_TEMP_ENTITY
+        )
+        self.window_delay_minutes = options.get(
+            OPTION_WINDOW_DELAY_MINUTES, DEFAULT_WINDOW_DELAY_MINUTES
+        )
+
+    async def async_update_options(self) -> None:
+        """Called when the user saves the options flow ("Configure"). The
+        watched-entity set may have changed (window sensor / house mode
+        entity added, removed, or swapped), so listeners are torn down and
+        re-registered against the fresh values."""
+        if self._remove_listener:
+            self._remove_listener()
+            self._remove_listener = None
+        self._read_options()
+        await self.async_setup_listeners()
+        await self.async_evaluate()
 
     # -- entity registration, called from each platform's async_added_to_hass --
     def register_number(self, key: str, entity: Any) -> None:

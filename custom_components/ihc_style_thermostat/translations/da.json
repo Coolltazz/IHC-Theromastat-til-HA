@@ -4,15 +4,12 @@
     "step": {
       "user": {
         "title": "Tilføj et rum",
-        "description": "Tilslut sensorer og relæ for dette rum. Alle øvrige indstillinger (sætpunkter, hysterese, pulsvarme) oprettes som redigerbare entiteter bagefter.",
+        "description": "Tilslut sensorer og relæ for dette rum. Valgfrie ekstra ting (vindue-sensor, husets tilstand, udendørs sensor) og alle øvrige indstillinger (sætpunkter, hysterese, pulsvarme) kan tilføjes bagefter via Konfigurér / som redigerbare entiteter.",
         "data": {
           "name": "Rumnavn",
           "room_temp_sensor": "Rumtemperatur-sensor",
           "floor_temp_sensor": "Gulvtemperatur-sensor (valgfri)",
-          "heater_switch": "Varme-relæ (switch)",
-          "window_sensor": "Vindue/dør-kontakt (valgfri)",
-          "house_mode_entity": "Husets tilstand (select, valgfri)",
-          "outdoor_temp_entity": "Udendørs \"føles som\"-temperatursensor (valgfri, til vejrkompenseret pulsvarme)"
+          "heater_switch": "Varme-relæ (switch)"
         }
       }
     },
@@ -25,6 +22,9 @@
       "init": {
         "title": "Indstillinger",
         "data": {
+          "window_sensor": "Vindue/dør-kontakt (valgfri)",
+          "house_mode_entity": "Husets tilstand (select, valgfri)",
+          "outdoor_temp_entity": "Udendørs \"føles som\"-temperatursensor (valgfri, til vejrkompenseret pulsvarme)",
           "window_delay_minutes": "Forsinkelse før varme afbrydes ved åbent vindue (minutter)"
         }
       }

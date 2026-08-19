@@ -35,6 +35,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     coordinator: RoomHeatingCoordinator = hass.data[DOMAIN][entry.entry_id]
-    coordinator.window_delay_minutes = entry.options.get(
-        "window_delay_minutes", coordinator.window_delay_minutes
-    )
+    await coordinator.async_update_options()
