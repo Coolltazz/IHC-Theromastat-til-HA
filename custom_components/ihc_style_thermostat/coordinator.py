@@ -299,8 +299,9 @@ class RoomHeatingCoordinator:
                     status_extra = f" (Pulsvarme: {self._pulse_phase.upper()})"
 
         if heat_call != self._last_heat_call:
+            heater_domain = self.heater_switch.split(".", 1)[0]
             await self.hass.services.async_call(
-                "switch",
+                heater_domain,
                 "turn_on" if heat_call else "turn_off",
                 {"entity_id": self.heater_switch},
                 blocking=False,

@@ -40,7 +40,9 @@ STEP_USER_SCHEMA = vol.Schema(
         vol.Optional(CONF_FLOOR_TEMP_SENSOR): EntitySelector(
             EntitySelectorConfig(domain="sensor", device_class="temperature")
         ),
-        vol.Required(CONF_HEATER_SWITCH): EntitySelector(EntitySelectorConfig(domain="switch")),
+        vol.Required(CONF_HEATER_SWITCH): EntitySelector(
+            EntitySelectorConfig(domain=["switch", "input_boolean"])
+        ),
         vol.Optional(CONF_WINDOW_SENSOR): EntitySelector(
             EntitySelectorConfig(domain="binary_sensor")
         ),
