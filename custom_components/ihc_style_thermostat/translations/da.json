@@ -11,7 +11,8 @@
           "floor_temp_sensor": "Gulvtemperatur-sensor (valgfri)",
           "heater_switch": "Varme-relæ (switch)",
           "window_sensor": "Vindue/dør-kontakt (valgfri)",
-          "house_mode_entity": "Husets tilstand (select, valgfri)"
+          "house_mode_entity": "Husets tilstand (select, valgfri)",
+          "outdoor_temp_entity": "Udendørs \"føles som\"-temperatursensor (valgfri, til vejrkompenseret pulsvarme)"
         }
       }
     },
@@ -40,7 +41,12 @@
       "max_temp_gulv": { "name": "Max temperatur, gulv" },
       "hysterese": { "name": "Hysterese" },
       "pulsvarme_varme_on_min": { "name": "Pulsvarme, varme ON-varighed" },
-      "pulsvarme_varme_off_min": { "name": "Pulsvarme, varme OFF-varighed" }
+      "pulsvarme_varme_off_min": { "name": "Pulsvarme, varme OFF-varighed" },
+      "ude_temp_lav": { "name": "Pulsvarme: kold-dags udetemperatur" },
+      "ude_temp_hoej": { "name": "Pulsvarme: mild-dags udetemperatur" },
+      "pulsvarme_duty_min": { "name": "Pulsvarme: min. duty" },
+      "pulsvarme_duty_max": { "name": "Pulsvarme: max. duty" },
+      "pulsvarme_adaptiv_bias": { "name": "Pulsvarme: adaptiv bias (selvjusteres)" }
     },
     "select": {
       "regulering": { "name": "Reguleringsform" },

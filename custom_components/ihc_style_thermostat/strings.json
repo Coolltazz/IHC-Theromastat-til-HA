@@ -11,7 +11,8 @@
           "floor_temp_sensor": "Floor temperature sensor (optional)",
           "heater_switch": "Heater relay switch",
           "window_sensor": "Window/door contact sensor (optional)",
-          "house_mode_entity": "House mode select entity (optional)"
+          "house_mode_entity": "House mode select entity (optional)",
+          "outdoor_temp_entity": "Outdoor \"feels like\" temperature sensor (optional, for weather-compensated pulse heating)"
         }
       }
     },
@@ -40,7 +41,12 @@
       "max_temp_gulv": { "name": "Max temperature, floor" },
       "hysterese": { "name": "Hysteresis" },
       "pulsvarme_varme_on_min": { "name": "Pulse heat ON duration" },
-      "pulsvarme_varme_off_min": { "name": "Pulse heat OFF duration" }
+      "pulsvarme_varme_off_min": { "name": "Pulse heat OFF duration" },
+      "ude_temp_lav": { "name": "Pulse heating: cold-day outdoor temperature" },
+      "ude_temp_hoej": { "name": "Pulse heating: mild-day outdoor temperature" },
+      "pulsvarme_duty_min": { "name": "Pulse heating: minimum duty" },
+      "pulsvarme_duty_max": { "name": "Pulse heating: maximum duty" },
+      "pulsvarme_adaptiv_bias": { "name": "Pulse heating: adaptive bias (auto-tuned)" }
     },
     "select": {
       "regulering": { "name": "Regulation mode" },

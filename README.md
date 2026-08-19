@@ -11,9 +11,14 @@ through the UI, no YAML.
 - Room and/or floor temperature regulation, with a selectable priority
   ("one sensor satisfied" vs. "both sensors satisfied") when using both.
 - Hysteresis-based heat calls with an optional **pulse (duty-cycle) heating**
-  mode: once the target is reached, the relay cycles ON/OFF on configurable
-  durations instead of sitting idle, to hold the temperature closer to
-  setpoint.
+  mode: once the target is reached, the relay cycles ON/OFF on a configurable
+  total cycle length instead of sitting idle, to hold the temperature closer
+  to setpoint. The ON/OFF split within that cycle is **weather-compensated**
+  (scaled between a mild-day and a cold-day outdoor "feels like" temperature)
+  and then **self-adjusting**: a persisted bias nudges the split up if a
+  cycle ever had to hand off to a full heat call (ran too cold), and eases
+  it down after cycles that held comfortably — no separate weather station
+  integration or ML model required, just the room's own tracking history.
 - Frost protection, night setback, and guest setpoints, driven by a shared
   "house mode" `select`/`input_select` entity you already have (or none —
   the room then just runs in "occupied" mode).
@@ -47,10 +52,13 @@ Each config entry wires up:
 | Heater relay switch | yes | `switch.*` — must be unique per config entry |
 | Window/door contact | no | `binary_sensor.*` |
 | House mode entity | no | Any `select`/`input_select` with values like `Beboet`/`Ubeboet`/`Frostsikring`/`Gæster` |
+| Outdoor "feels like" sensor | no | `sensor.*`, `device_class: temperature`. Powers the weather-compensated pulse duty cycle; without it, pulse heating falls back to the midpoint between min/max duty. |
 
 Everything else (setpoints, hysteresis, max-temp limits, regulation mode,
-priority, local override, pulse heating on/off + durations) is created as
-entities on the new device and can be changed at any time from the UI.
+priority, local override, pulse heating on/off + durations + the two
+weather-compensation reference temperatures + min/max duty + the
+auto-tuned adaptive bias) is created as entities on the new device and can
+be changed at any time from the UI.
 
 ## Credits
 

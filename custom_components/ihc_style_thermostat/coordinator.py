@@ -17,6 +17,7 @@ from .const import (
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HEATER_SWITCH,
     CONF_HOUSE_MODE_ENTITY,
+    CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOM_TEMP_SENSOR,
     CONF_WINDOW_SENSOR,
     DEFAULT_WINDOW_DELAY_MINUTES,
@@ -49,6 +50,7 @@ class RoomHeatingCoordinator:
         self.heater_switch: str = entry.data[CONF_HEATER_SWITCH]
         self.window_sensor: str | None = entry.data.get(CONF_WINDOW_SENSOR)
         self.house_mode_entity: str | None = entry.data.get(CONF_HOUSE_MODE_ENTITY)
+        self.outdoor_temp_entity: str | None = entry.data.get(CONF_OUTDOOR_TEMP_ENTITY)
         self.window_delay_minutes: float = entry.options.get(
             OPTION_WINDOW_DELAY_MINUTES, DEFAULT_WINDOW_DELAY_MINUTES
         )
@@ -63,6 +65,12 @@ class RoomHeatingCoordinator:
 
         self._pulse_phase: str | None = None  # None / "on" / "off"
         self._pulse_cancel = None
+        # Weather-compensated + self-adjusting duty split for the current
+        # cycle -- computed once when a cycle starts, reused for both its
+        # phases (settings/weather changes take effect next cycle).
+        self._cycle_on_minutes: float | None = None
+        self._cycle_off_minutes: float | None = None
+        self._current_duty_pct: float | None = None
 
         self._window_open_since = None
         self._window_cancel = None
@@ -159,14 +167,56 @@ class RoomHeatingCoordinator:
             self._pulse_cancel()
             self._pulse_cancel = None
         self._pulse_phase = None
+        self._cycle_on_minutes = None
+        self._cycle_off_minutes = None
+
+    def _compute_duty_percent(self) -> tuple[float, float, float]:
+        """Weather-compensated ON share (%) of the pulse cycle, plus a
+        slowly self-adjusting bias trimmed by how well past cycles actually
+        held the temperature (see async_adjust_bias). Returns
+        (duty, feedforward_duty, bias)."""
+        outdoor = self._get_float(self.outdoor_temp_entity) if self.outdoor_temp_entity else None
+        t_low = self._number("ude_temp_lav")
+        t_high = self._number("ude_temp_hoej")
+        duty_min = self._number("pulsvarme_duty_min")
+        duty_max = self._number("pulsvarme_duty_max")
+        if duty_min is None:
+            duty_min = 15.0
+        if duty_max is None:
+            duty_max = 90.0
+
+        if outdoor is None or t_low is None or t_high is None or t_high <= t_low:
+            duty_ff = (duty_min + duty_max) / 2.0
+        else:
+            fraction = (t_high - outdoor) / (t_high - t_low)
+            fraction = max(0.0, min(1.0, fraction))
+            duty_ff = duty_min + fraction * (duty_max - duty_min)
+
+        bias = self._number("pulsvarme_adaptiv_bias") or 0.0
+        duty = max(duty_min, min(duty_max, duty_ff + bias))
+        return duty, duty_ff, bias
+
+    def _adjust_bias(self, delta: float) -> None:
+        """Nudges the persisted adaptive bias (percentage points). Positive
+        delta = pulse heating ran too cold last time, pull more ON time in.
+        Negative delta = it held fine, can probably ease off slightly.
+
+        Writes the entity's state directly (not via async_set_native_value,
+        which itself triggers a fresh async_evaluate() -- calling that here
+        would re-enter the evaluation we're already inside)."""
+        entity = self._numbers.get("pulsvarme_adaptiv_bias")
+        if entity is None:
+            return
+        bias = entity.native_value or 0.0
+        bias = max(-30.0, min(30.0, bias + delta))
+        entity._attr_native_value = round(bias, 1)  # noqa: SLF001 -- internal coordinator<->entity link
+        if entity.hass is not None:
+            entity.async_write_ha_state()
 
     def _schedule_pulse_timer(self) -> None:
         if self._pulse_cancel:
             self._pulse_cancel()
-        minutes_key = (
-            "pulsvarme_varme_on_min" if self._pulse_phase == "on" else "pulsvarme_varme_off_min"
-        )
-        minutes = self._number(minutes_key) or 20
+        minutes = self._cycle_on_minutes if self._pulse_phase == "on" else self._cycle_off_minutes
         self._pulse_cancel = async_call_later(self.hass, minutes * 60, self._pulse_timer_elapsed)
 
     @callback
@@ -281,6 +331,12 @@ class RoomHeatingCoordinator:
                 heat_call = False
                 status_extra = " (Max temp nået)"
             elif not target_satisfied:
+                if self._pulse_phase is not None:
+                    # We had to drop out of pulse heating because the
+                    # temperature fell through anyway -- duty was too low.
+                    # React faster than we ease off (better too warm than
+                    # too cold).
+                    self._adjust_bias(3.0)
                 self._cancel_pulse()
                 heat_call = True
             else:
@@ -290,13 +346,35 @@ class RoomHeatingCoordinator:
                     heat_call = False
                 else:
                     if self._pulse_phase is None:
+                        cycle_minutes = (self._number("pulsvarme_varme_on_min") or 20) + (
+                            self._number("pulsvarme_varme_off_min") or 20
+                        )
+                        duty_pct, duty_ff, bias = self._compute_duty_percent()
+                        self._current_duty_pct = duty_pct
+                        self._cycle_on_minutes = max(1.0, cycle_minutes * duty_pct / 100.0)
+                        self._cycle_off_minutes = max(1.0, cycle_minutes - self._cycle_on_minutes)
                         self._pulse_phase = "on"
                         self._schedule_pulse_timer()
+                        _LOGGER.info(
+                            "%s: new pulse cycle -- duty=%.0f%% (weather=%.0f%%, bias=%+.1f), "
+                            "ON=%.1fmin OFF=%.1fmin",
+                            self.entry.title,
+                            duty_pct,
+                            duty_ff,
+                            bias,
+                            self._cycle_on_minutes,
+                            self._cycle_off_minutes,
+                        )
                     elif phase_elapsed:
+                        if self._pulse_phase == "off":
+                            # A full cycle completed without a genuine heat
+                            # call taking over -- held fine, ease off a bit.
+                            self._adjust_bias(-1.0)
                         self._pulse_phase = "off" if self._pulse_phase == "on" else "on"
                         self._schedule_pulse_timer()
                     heat_call = self._pulse_phase == "on"
-                    status_extra = f" (Pulsvarme: {self._pulse_phase.upper()})"
+                    duty_txt = f", {self._current_duty_pct:.0f}% duty" if self._current_duty_pct else ""
+                    status_extra = f" (Pulsvarme: {self._pulse_phase.upper()}{duty_txt})"
 
         if heat_call != self._last_heat_call:
             heater_domain = self.heater_switch.split(".", 1)[0]

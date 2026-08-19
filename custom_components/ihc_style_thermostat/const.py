@@ -7,6 +7,7 @@ CONF_FLOOR_TEMP_SENSOR = "floor_temp_sensor"
 CONF_HEATER_SWITCH = "heater_switch"
 CONF_WINDOW_SENSOR = "window_sensor"
 CONF_HOUSE_MODE_ENTITY = "house_mode_entity"
+CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"
 
 OPTION_WINDOW_DELAY_MINUTES = "window_delay_minutes"
 DEFAULT_WINDOW_DELAY_MINUTES = 10
@@ -49,6 +50,16 @@ NUMBER_DEFS = {
     "hysterese": (0.3, 0.1, 3.0, 0.1, "°C", "mdi:sine-wave"),
     "pulsvarme_varme_on_min": (20.0, 1.0, 120.0, 1.0, "min", "mdi:timer-play"),
     "pulsvarme_varme_off_min": (20.0, 1.0, 120.0, 1.0, "min", "mdi:timer-pause"),
+    # Weather-compensated + self-adjusting pulse duty cycle (see coordinator.py
+    # _compute_duty_percent / _adjust_bias). "pulsvarme_adaptiv_bias" is not
+    # meant for routine manual editing -- the coordinator reads/writes it
+    # itself, but it must be a real, restorable entity to persist across
+    # HA restarts.
+    "ude_temp_lav": (-10.0, -30.0, 10.0, 0.5, "°C", "mdi:snowflake-thermometer"),
+    "ude_temp_hoej": (15.0, 0.0, 25.0, 0.5, "°C", "mdi:thermometer"),
+    "pulsvarme_duty_min": (15.0, 0.0, 100.0, 1.0, "%", "mdi:percent-outline"),
+    "pulsvarme_duty_max": (90.0, 0.0, 100.0, 1.0, "%", "mdi:percent"),
+    "pulsvarme_adaptiv_bias": (0.0, -30.0, 30.0, 0.1, "%", "mdi:tune"),
 }
 
 # key -> (options, default, icon)

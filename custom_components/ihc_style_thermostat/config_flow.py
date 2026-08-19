@@ -24,6 +24,7 @@ from .const import (
     CONF_FLOOR_TEMP_SENSOR,
     CONF_HEATER_SWITCH,
     CONF_HOUSE_MODE_ENTITY,
+    CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOM_TEMP_SENSOR,
     CONF_WINDOW_SENSOR,
     DEFAULT_WINDOW_DELAY_MINUTES,
@@ -48,6 +49,9 @@ STEP_USER_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_HOUSE_MODE_ENTITY): EntitySelector(
             EntitySelectorConfig(domain=["select", "input_select"])
+        ),
+        vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain="sensor", device_class="temperature")
         ),
     }
 )
