@@ -64,7 +64,6 @@ class RoomHeatingCoordinator:
 
         self._room_satisfied: bool | None = None
         self._floor_satisfied: bool | None = None
-        self._last_heat_call: bool | None = None
 
         self._pulse_phase: str | None = None  # None / "on" / "off"
         self._pulse_cancel = None
@@ -349,6 +348,26 @@ class RoomHeatingCoordinator:
                 else:
                     target_satisfied = self._room_satisfied or self._floor_satisfied
 
+            # Pulse heating is a maintenance aid for holding steady right at
+            # the setpoint -- it is not meant to keep cycling the relay when
+            # the room has simply overshot by several degrees (e.g. sun
+            # through a window). Require the relevant sensor(s) to still be
+            # within one hysteresis band above their setpoint before we
+            # consider pulsing at all; further above than that, there is no
+            # need for any heat, pulsed or not.
+            room_near_target = (
+                room_temp is None or room_sp is None or room_temp <= room_sp + band
+            )
+            floor_near_target = (
+                floor_temp is None or floor_sp is None or floor_temp <= floor_sp + band
+            )
+            if regulation == "Gulv":
+                pulse_eligible = floor_near_target
+            elif regulation == "Rum":
+                pulse_eligible = room_near_target
+            else:  # "Rum og gulv"
+                pulse_eligible = room_near_target and floor_near_target
+
             max_room = self._number("max_temp_rum")
             max_floor = self._number("max_temp_gulv")
             max_blocked = (
@@ -368,6 +387,12 @@ class RoomHeatingCoordinator:
                     self._adjust_bias(3.0)
                 self._cancel_pulse()
                 heat_call = True
+            elif not pulse_eligible:
+                # Comfortably satisfied and then some -- well above setpoint,
+                # no maintenance pulsing needed.
+                self._cancel_pulse()
+                heat_call = False
+                status_extra = " (Langt over sætpunkt)"
             else:
                 pulsvarme = self._select("pulsvarme")
                 if pulsvarme != "Aktiveret":
@@ -403,7 +428,15 @@ class RoomHeatingCoordinator:
                     duty_txt = f", {self._current_duty_pct:.0f}% duty" if self._current_duty_pct else ""
                     status_extra = f" (Pulsvarme: {self._pulse_phase.upper()}{duty_txt})"
 
-        if heat_call != self._last_heat_call:
+        # Compare against the heater switch's actual reported state rather
+        # than an internally-cached "last sent" value. On HA startup the KNX
+        # switch entity is often not yet available when the first evaluation
+        # runs (its service call then fails silently), which used to leave
+        # the relay stuck out of sync forever since we never retried. Reading
+        # the live state instead makes this self-correcting.
+        heater_state = self.hass.states.get(self.heater_switch)
+        switch_is_on = heater_state is not None and heater_state.state == "on"
+        if switch_is_on != heat_call:
             heater_domain = self.heater_switch.split(".", 1)[0]
             await self.hass.services.async_call(
                 heater_domain,
@@ -411,7 +444,6 @@ class RoomHeatingCoordinator:
                 {"entity_id": self.heater_switch},
                 blocking=False,
             )
-            self._last_heat_call = heat_call
             _LOGGER.info(
                 "%s: heat_call -> %s (mode=%s, room=%s, floor=%s, room_sp=%s, floor_sp=%s)",
                 self.entry.title,
