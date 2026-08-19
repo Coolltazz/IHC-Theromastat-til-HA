@@ -375,9 +375,7 @@ class RoomHeatingCoordinator:
                     heat_call = False
                 else:
                     if self._pulse_phase is None:
-                        cycle_minutes = (self._number("pulsvarme_varme_on_min") or 20) + (
-                            self._number("pulsvarme_varme_off_min") or 20
-                        )
+                        cycle_minutes = self._number("pulsvarme_cyklus_min") or 40
                         duty_pct, duty_ff, bias = self._compute_duty_percent()
                         self._current_duty_pct = duty_pct
                         self._cycle_on_minutes = max(1.0, cycle_minutes * duty_pct / 100.0)

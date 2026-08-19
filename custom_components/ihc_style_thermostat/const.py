@@ -48,8 +48,11 @@ NUMBER_DEFS = {
     "max_temp_rum": (26.0, 20.0, 35.0, 0.5, "°C", "mdi:thermometer-alert"),
     "max_temp_gulv": (30.0, 20.0, 40.0, 0.5, "°C", "mdi:thermometer-alert"),
     "hysterese": (0.3, 0.1, 3.0, 0.1, "°C", "mdi:sine-wave"),
-    "pulsvarme_varme_on_min": (20.0, 1.0, 120.0, 1.0, "min", "mdi:timer-play"),
-    "pulsvarme_varme_off_min": (20.0, 1.0, 120.0, 1.0, "min", "mdi:timer-pause"),
+    # Total pulse-cycle length. The ON/OFF split within it is computed live
+    # from the duty% (weather compensation + adaptive bias below) -- there
+    # is deliberately no separate "ON duration"/"OFF duration" setting,
+    # since only their sum would ever matter once duty% exists.
+    "pulsvarme_cyklus_min": (40.0, 2.0, 240.0, 1.0, "min", "mdi:timer-sync"),
     # Weather-compensated + self-adjusting pulse duty cycle (see coordinator.py
     # _compute_duty_percent / _adjust_bias). "pulsvarme_adaptiv_bias" is not
     # meant for routine manual editing -- the coordinator reads/writes it
