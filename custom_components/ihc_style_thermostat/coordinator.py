@@ -65,6 +65,16 @@ class RoomHeatingCoordinator:
 
         self._room_satisfied: bool | None = None
         self._floor_satisfied: bool | None = None
+        # Last-observed reading of whichever sensor drives regulation, used
+        # to detect "still rising" (residual heat working through a floor
+        # slab after the relay closes) before starting a fresh pulse cycle.
+        self._last_seen_temp: float | None = None
+        # Tracks a residual-heat observation in progress: set when an ON
+        # phase ends (baseline = temp at that moment), updated with the
+        # highest reading seen while still rising, and blended into the
+        # learned pulsvarme_eftervarme_graders once the rise stops.
+        self._pending_overshoot_baseline: float | None = None
+        self._pending_overshoot_peak: float | None = None
 
         self._pulse_phase: str | None = None  # None / "on" / "off"
         self._pulse_cancel = None
@@ -265,6 +275,23 @@ class RoomHeatingCoordinator:
         if entity.hass is not None:
             entity.async_write_ha_state()
 
+    def _adjust_eftervarme(self, observed: float) -> None:
+        """Blends a freshly observed residual-heat overshoot (degrees the
+        primary sensor kept climbing after an ON phase ended) into the
+        learned per-room estimate. Moves a fifth of the way toward the new
+        observation each time -- smooths out single-cycle noise while still
+        adapting within a handful of cycles. Same direct-write pattern as
+        _adjust_bias, for the same re-entrancy reason."""
+        entity = self._numbers.get("pulsvarme_eftervarme_graders")
+        if entity is None:
+            return
+        current = entity.native_value or 0.0
+        new_value = current + 0.2 * (observed - current)
+        new_value = max(0.0, min(5.0, round(new_value, 2)))
+        entity._attr_native_value = new_value  # noqa: SLF001 -- internal coordinator<->entity link
+        if entity.hass is not None:
+            entity.async_write_ha_state()
+
     def _schedule_pulse_timer(self) -> None:
         if self._pulse_cancel:
             self._pulse_cancel()
@@ -347,6 +374,13 @@ class RoomHeatingCoordinator:
         regulation = self._select("regulering")
         priority = self._select("prioritet")
         band = self._number("hysterese") or 0.3
+        trend_temp = floor_temp if regulation == "Gulv" else room_temp
+        trend_sp = floor_sp if regulation == "Gulv" else room_sp
+        still_rising = (
+            self._last_seen_temp is not None
+            and trend_temp is not None
+            and trend_temp > self._last_seen_temp
+        )
 
         heat_call = False
         status_extra = ""
@@ -433,6 +467,14 @@ class RoomHeatingCoordinator:
                 if pulsvarme != "Aktiveret":
                     self._cancel_pulse()
                     heat_call = False
+                elif self._pulse_phase is None and still_rising:
+                    # A floor slab keeps releasing residual heat for well
+                    # after the relay closes -- if the temperature is still
+                    # climbing from a previous cycle, starting a fresh ON
+                    # phase now just compounds that overshoot. Hold off and
+                    # let it plateau; the next sensor update re-checks this.
+                    heat_call = False
+                    status_extra = " (Afventer eftervarme)"
                 else:
                     if self._pulse_phase is None:
                         cycle_minutes = self._number("pulsvarme_cyklus_min") or 40
@@ -463,8 +505,35 @@ class RoomHeatingCoordinator:
                             # A full cycle completed without a genuine heat
                             # call taking over -- held fine, ease off a bit.
                             self._adjust_bias(-1.0)
+                        elif self._pulse_phase == "on":
+                            # ON phase ending naturally -- start tracking how
+                            # far residual heat pushes the temperature from
+                            # here before it plateaus (see the finalize check
+                            # near the end of this method).
+                            self._pending_overshoot_baseline = trend_temp
+                            self._pending_overshoot_peak = trend_temp
                         self._pulse_phase = "off" if self._pulse_phase == "on" else "on"
                         self._schedule_pulse_timer()
+                    elif self._pulse_phase == "on":
+                        eftervarme = self._number("pulsvarme_eftervarme_graders") or 0.0
+                        if (
+                            trend_temp is not None
+                            and trend_sp is not None
+                            and trend_temp + eftervarme >= trend_sp + band
+                        ):
+                            # Learned residual heat says this room typically
+                            # keeps climbing ~eftervarme degrees after the
+                            # relay closes -- cut the ON phase short now so
+                            # that rise lands on the setpoint instead of past
+                            # it, rather than waiting for the actual reading
+                            # to cross the threshold.
+                            self._pending_overshoot_baseline = trend_temp
+                            self._pending_overshoot_peak = trend_temp
+                            if self._pulse_cancel:
+                                self._pulse_cancel()
+                                self._pulse_cancel = None
+                            self._pulse_phase = "off"
+                            self._schedule_pulse_timer()
                     heat_call = self._pulse_phase == "on"
                     duty_txt = f", {self._current_duty_pct:.0f}% duty" if self._current_duty_pct else ""
                     status_extra = f" (Pulsvarme: {self._pulse_phase.upper()}{duty_txt})"
@@ -495,6 +564,21 @@ class RoomHeatingCoordinator:
                 room_sp,
                 floor_sp,
             )
+
+        if self._pending_overshoot_baseline is not None and trend_temp is not None:
+            if trend_temp > self._pending_overshoot_peak:
+                self._pending_overshoot_peak = trend_temp
+            if not still_rising:
+                # Temperature has stopped climbing -- residual heat from the
+                # last ON phase has fully surfaced. Blend the observed
+                # overshoot into the learned estimate.
+                observed = max(0.0, self._pending_overshoot_peak - self._pending_overshoot_baseline)
+                self._adjust_eftervarme(observed)
+                self._pending_overshoot_baseline = None
+                self._pending_overshoot_peak = None
+
+        if trend_temp is not None:
+            self._last_seen_temp = trend_temp
 
         status_sensor = self._sensors.get("varme_tilstand")
         if status_sensor:

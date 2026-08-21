@@ -69,6 +69,14 @@ NUMBER_DEFS = {
     "pulsvarme_duty_min": (15.0, 0.0, 100.0, 1.0, "%", "mdi:percent-outline"),
     "pulsvarme_duty_max": (90.0, 0.0, 100.0, 1.0, "%", "mdi:percent"),
     "pulsvarme_adaptiv_bias": (0.0, -30.0, 30.0, 0.1, "%", "mdi:tune"),
+    # Learned residual-heat overshoot: how many degrees this room's primary
+    # sensor typically keeps climbing *after* the relay closes (thermal
+    # lag/mass -- most pronounced in floor slabs). Nudged by the coordinator
+    # after each pulse cycle (see _adjust_eftervarme) and used to end the ON
+    # phase that much early, so the residual rise lands on the setpoint
+    # instead of past it. Starts at 0 (no correction) and learns over a
+    # handful of cycles.
+    "pulsvarme_eftervarme_graders": (0.0, 0.0, 5.0, 0.1, "°C", "mdi:thermometer-chevron-up"),
 }
 
 # key -> (options, default, icon)

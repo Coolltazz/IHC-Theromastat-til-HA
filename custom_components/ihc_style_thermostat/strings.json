@@ -46,7 +46,8 @@
       "ude_temp_hoej": { "name": "Pulse heating: mild-day outdoor temperature" },
       "pulsvarme_duty_min": { "name": "Pulse heating: minimum duty" },
       "pulsvarme_duty_max": { "name": "Pulse heating: maximum duty" },
-      "pulsvarme_adaptiv_bias": { "name": "Pulse heating: adaptive bias (auto-tuned)" }
+      "pulsvarme_adaptiv_bias": { "name": "Pulse heating: adaptive bias (auto-tuned)" },
+      "pulsvarme_eftervarme_graders": { "name": "Pulse heating: learned residual heat (auto-tuned)" }
     },
     "select": {
       "regulering": { "name": "Regulation mode" },

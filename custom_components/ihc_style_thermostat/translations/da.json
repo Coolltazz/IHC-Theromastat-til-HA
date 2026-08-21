@@ -46,7 +46,8 @@
       "ude_temp_hoej": { "name": "Pulsvarme: mild-dags udetemperatur" },
       "pulsvarme_duty_min": { "name": "Pulsvarme: min. duty" },
       "pulsvarme_duty_max": { "name": "Pulsvarme: max. duty" },
-      "pulsvarme_adaptiv_bias": { "name": "Pulsvarme: adaptiv bias (selvjusteres)" }
+      "pulsvarme_adaptiv_bias": { "name": "Pulsvarme: adaptiv bias (selvjusteres)" },
+      "pulsvarme_eftervarme_graders": { "name": "Pulsvarme: lært eftervarme (selvjusteres)" }
     },
     "select": {
       "regulering": { "name": "Reguleringsform" },
