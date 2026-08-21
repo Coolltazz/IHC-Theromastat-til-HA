@@ -61,6 +61,7 @@ class RoomHeatingCoordinator:
         self._numbers: dict[str, Any] = {}
         self._selects: dict[str, Any] = {}
         self._sensors: dict[str, Any] = {}
+        self._climate: Any = None
 
         self._room_satisfied: bool | None = None
         self._floor_satisfied: bool | None = None
@@ -115,6 +116,29 @@ class RoomHeatingCoordinator:
     def register_sensor(self, key: str, entity: Any) -> None:
         self._sensors[key] = entity
 
+    def register_climate(self, entity: Any) -> None:
+        self._climate = entity
+
+    # -- setters used by the climate entity (the dial only edits the
+    # "occupied" setpoint and the forced-off local mode; everything else
+    # stays reachable via the dedicated number/select entities) --
+    async def async_set_beboet_setpoint(self, value: float) -> None:
+        regulation = self._select("regulering")
+        key = "setpunkt_gulv_beboet" if regulation == "Gulv" else "setpunkt_rum_beboet"
+        entity = self._numbers.get(key)
+        if entity:
+            await entity.async_set_native_value(value)
+
+    async def async_set_forced_off(self, off: bool) -> None:
+        entity = self._selects.get("lokal_tilstand")
+        if entity is None:
+            return
+        current = entity.current_option
+        if off:
+            await entity.async_select_option("Tvunget fra")
+        elif current == "Tvunget fra":
+            await entity.async_select_option("Følger husets tilstand")
+
     def _number(self, key: str) -> float | None:
         entity = self._numbers.get(key)
         return entity.native_value if entity else None
@@ -144,7 +168,7 @@ class RoomHeatingCoordinator:
         return state.state
 
     async def async_setup_listeners(self) -> None:
-        entities = [self.room_temp_sensor]
+        entities = [self.room_temp_sensor, self.heater_switch]
         if self.floor_temp_sensor:
             entities.append(self.floor_temp_sensor)
         if self.house_mode_entity:
@@ -365,7 +389,18 @@ class RoomHeatingCoordinator:
                 pulse_eligible = floor_near_target
             elif regulation == "Rum":
                 pulse_eligible = room_near_target
-            else:  # "Rum og gulv"
+            elif priority == "Begge temperaturer opfyldt":
+                # Both sensors must reach setpoint+band before we're allowed
+                # to consider things satisfied at all -- so it takes BOTH
+                # being well past that (not just one) before there is truly
+                # no need for any further heat. If only one has overshot
+                # while the other is merely holding at/near its setpoint,
+                # gentle pulsing should continue for that one's sake.
+                pulse_eligible = room_near_target or floor_near_target
+            else:  # "1 temperatur opfyldt"
+                # Either sensor alone was enough to call things satisfied,
+                # mirroring that: stop pulsing as soon as either one has
+                # safely overshot, same as target_satisfied needs only one.
                 pulse_eligible = room_near_target and floor_near_target
 
             max_room = self._number("max_temp_rum")
@@ -403,8 +438,14 @@ class RoomHeatingCoordinator:
                         cycle_minutes = self._number("pulsvarme_cyklus_min") or 40
                         duty_pct, duty_ff, bias = self._compute_duty_percent()
                         self._current_duty_pct = duty_pct
-                        self._cycle_on_minutes = max(1.0, cycle_minutes * duty_pct / 100.0)
-                        self._cycle_off_minutes = max(1.0, cycle_minutes - self._cycle_on_minutes)
+                        # Never let a phase run shorter than the actuator's
+                        # own travel time -- otherwise it gets told to close
+                        # again before it has even finished opening (or vice
+                        # versa), delivering little to no real heat despite
+                        # the relay reporting "on".
+                        min_phase = self._number("pulsvarme_min_fase_min") or 8.0
+                        self._cycle_on_minutes = max(min_phase, cycle_minutes * duty_pct / 100.0)
+                        self._cycle_off_minutes = max(min_phase, cycle_minutes - self._cycle_on_minutes)
                         self._pulse_phase = "on"
                         self._schedule_pulse_timer()
                         _LOGGER.info(
@@ -462,3 +503,22 @@ class RoomHeatingCoordinator:
             sensor = self._sensors.get(key)
             if sensor and value is not None:
                 sensor.async_update_state(value)
+
+        if self._climate:
+            if regulation == "Gulv":
+                primary_temp, primary_sp = floor_temp, floor_sp
+            else:
+                primary_temp, primary_sp = room_temp, room_sp
+            self._climate.async_update_state(
+                mode=mode,
+                # The dial's "Opvarmning"/"Inaktiv" label should reflect
+                # what the relay is actually doing right now, not our
+                # decision from this cycle -- they're usually the same
+                # instant, but this stays correct even if the physical
+                # switch lags behind or gets toggled independently.
+                heat_call=switch_is_on,
+                primary_temp=primary_temp,
+                primary_sp=primary_sp,
+                room_temp=room_temp,
+                floor_temp=floor_temp,
+            )

@@ -41,6 +41,7 @@
       "max_temp_gulv": { "name": "Max temperature, floor" },
       "hysterese": { "name": "Hysteresis" },
       "pulsvarme_cyklus_min": { "name": "Pulse heating: total cycle length" },
+      "pulsvarme_min_fase_min": { "name": "Pulse heating: minimum phase duration (actuator travel time)" },
       "ude_temp_lav": { "name": "Pulse heating: cold-day outdoor temperature" },
       "ude_temp_hoej": { "name": "Pulse heating: mild-day outdoor temperature" },
       "pulsvarme_duty_min": { "name": "Pulse heating: minimum duty" },

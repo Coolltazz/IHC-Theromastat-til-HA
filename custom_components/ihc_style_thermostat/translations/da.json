@@ -41,6 +41,7 @@
       "max_temp_gulv": { "name": "Max temperatur, gulv" },
       "hysterese": { "name": "Hysterese" },
       "pulsvarme_cyklus_min": { "name": "Pulsvarme: samlet cykluslængde" },
+      "pulsvarme_min_fase_min": { "name": "Pulsvarme: minimum fase-varighed (telestat åbne/lukketid)" },
       "ude_temp_lav": { "name": "Pulsvarme: kold-dags udetemperatur" },
       "ude_temp_hoej": { "name": "Pulsvarme: mild-dags udetemperatur" },
       "pulsvarme_duty_min": { "name": "Pulsvarme: min. duty" },

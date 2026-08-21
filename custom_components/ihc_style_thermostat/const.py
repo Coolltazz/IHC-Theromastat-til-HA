@@ -53,6 +53,12 @@ NUMBER_DEFS = {
     # is deliberately no separate "ON duration"/"OFF duration" setting,
     # since only their sum would ever matter once duty% exists.
     "pulsvarme_cyklus_min": (40.0, 2.0, 240.0, 1.0, "min", "mdi:timer-sync"),
+    # Floor under each ON/OFF phase, regardless of duty% -- a thermal
+    # actuator (telestat) takes real time to fully open/close (often
+    # several minutes), so a phase shorter than that delivers little to no
+    # actual heat even though the relay reports "on". Default (8 min) covers
+    # a typical 5-7 minute actuator travel time with a small margin.
+    "pulsvarme_min_fase_min": (8.0, 1.0, 30.0, 1.0, "min", "mdi:timer-alert"),
     # Weather-compensated + self-adjusting pulse duty cycle (see coordinator.py
     # _compute_duty_percent / _adjust_bias). "pulsvarme_adaptiv_bias" is not
     # meant for routine manual editing -- the coordinator reads/writes it
