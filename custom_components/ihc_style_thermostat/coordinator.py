@@ -7,6 +7,7 @@ maintenance zone, frost/night/guest setback, and max-temperature safety.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -77,6 +78,11 @@ class RoomHeatingCoordinator:
         self._pending_overshoot_peak: float | None = None
 
         self._pulse_phase: str | None = None  # None / "on" / "off"
+        # time.monotonic() when the current phase began -- enforces
+        # pulsvarme_min_fase_min as a hard floor on how long a phase is
+        # allowed to actually run, not just on the theoretical on/off split
+        # computed at cycle start (see the eftervarme cutoff guard below).
+        self._phase_started_at: float | None = None
         self._pulse_cancel = None
         # Weather-compensated + self-adjusting duty split for the current
         # cycle -- computed once when a cycle starts, reused for both its
@@ -229,6 +235,7 @@ class RoomHeatingCoordinator:
             self._pulse_cancel()
             self._pulse_cancel = None
         self._pulse_phase = None
+        self._phase_started_at = None
         self._cycle_on_minutes = None
         self._cycle_off_minutes = None
 
@@ -374,8 +381,31 @@ class RoomHeatingCoordinator:
         regulation = self._select("regulering")
         priority = self._select("prioritet")
         band = self._number("hysterese") or 0.3
-        trend_temp = floor_temp if regulation == "Gulv" else room_temp
-        trend_sp = floor_sp if regulation == "Gulv" else room_sp
+        if regulation == "Gulv":
+            trend_temp, trend_sp = floor_temp, floor_sp
+        elif regulation == "Rum":
+            trend_temp, trend_sp = room_temp, room_sp
+        else:  # "Rum og gulv" -- track whichever sensor is actually driving
+            # the pulse: the one with the smaller margin above its own
+            # setpoint (i.e. not yet overshot / still needing heat). Picking
+            # room_temp unconditionally here meant a room that overshot from
+            # e.g. sun through a window could cut a pulse cycle short that
+            # was only running to top up the floor, which was still near its
+            # setpoint the whole time.
+            room_margin = (
+                room_temp - room_sp if room_temp is not None and room_sp is not None else None
+            )
+            floor_margin = (
+                floor_temp - floor_sp if floor_temp is not None and floor_sp is not None else None
+            )
+            if room_margin is None:
+                trend_temp, trend_sp = floor_temp, floor_sp
+            elif floor_margin is None:
+                trend_temp, trend_sp = room_temp, room_sp
+            elif floor_margin < room_margin:
+                trend_temp, trend_sp = floor_temp, floor_sp
+            else:
+                trend_temp, trend_sp = room_temp, room_sp
         still_rising = (
             self._last_seen_temp is not None
             and trend_temp is not None
@@ -457,11 +487,26 @@ class RoomHeatingCoordinator:
                 self._cancel_pulse()
                 heat_call = True
             elif not pulse_eligible:
-                # Comfortably satisfied and then some -- well above setpoint,
-                # no maintenance pulsing needed.
-                self._cancel_pulse()
-                heat_call = False
-                status_extra = " (Langt over sætpunkt)"
+                min_phase = self._number("pulsvarme_min_fase_min") or 8.0
+                phase_age = (
+                    time.monotonic() - self._phase_started_at
+                    if self._phase_started_at is not None
+                    else min_phase * 60.0
+                )
+                if self._pulse_phase == "on" and phase_age < min_phase * 60.0:
+                    # Same actuator-travel-time reasoning as the eftervarme
+                    # cutoff below: a single sensor tick just over the
+                    # setpoint+band line shouldn't slam an ON phase shut
+                    # seconds after it opened. Let it run its minimum
+                    # course; the next evaluation re-checks pulse_eligible.
+                    heat_call = True
+                    status_extra = " (Langt over sætpunkt, afslutter fase)"
+                else:
+                    # Comfortably satisfied and then some -- well above
+                    # setpoint, no maintenance pulsing needed.
+                    self._cancel_pulse()
+                    heat_call = False
+                    status_extra = " (Langt over sætpunkt)"
             else:
                 pulsvarme = self._select("pulsvarme")
                 if pulsvarme != "Aktiveret":
@@ -489,6 +534,7 @@ class RoomHeatingCoordinator:
                         self._cycle_on_minutes = max(min_phase, cycle_minutes * duty_pct / 100.0)
                         self._cycle_off_minutes = max(min_phase, cycle_minutes - self._cycle_on_minutes)
                         self._pulse_phase = "on"
+                        self._phase_started_at = time.monotonic()
                         self._schedule_pulse_timer()
                         _LOGGER.info(
                             "%s: new pulse cycle -- duty=%.0f%% (weather=%.0f%%, bias=%+.1f), "
@@ -513,11 +559,19 @@ class RoomHeatingCoordinator:
                             self._pending_overshoot_baseline = trend_temp
                             self._pending_overshoot_peak = trend_temp
                         self._pulse_phase = "off" if self._pulse_phase == "on" else "on"
+                        self._phase_started_at = time.monotonic()
                         self._schedule_pulse_timer()
                     elif self._pulse_phase == "on":
                         eftervarme = self._number("pulsvarme_eftervarme_graders") or 0.0
+                        min_phase = self._number("pulsvarme_min_fase_min") or 8.0
+                        phase_age = (
+                            time.monotonic() - self._phase_started_at
+                            if self._phase_started_at is not None
+                            else min_phase * 60.0
+                        )
                         if (
-                            trend_temp is not None
+                            phase_age >= min_phase * 60.0
+                            and trend_temp is not None
                             and trend_sp is not None
                             and trend_temp + eftervarme >= trend_sp + band
                         ):
@@ -526,13 +580,19 @@ class RoomHeatingCoordinator:
                             # relay closes -- cut the ON phase short now so
                             # that rise lands on the setpoint instead of past
                             # it, rather than waiting for the actual reading
-                            # to cross the threshold.
+                            # to cross the threshold. Never before min_phase
+                            # has actually elapsed, though -- the actuator
+                            # needs that long to do anything regardless of
+                            # how many times we get re-evaluated in the
+                            # meantime (e.g. our own turn_on echoing back as
+                            # a state-change event on the heater switch).
                             self._pending_overshoot_baseline = trend_temp
                             self._pending_overshoot_peak = trend_temp
                             if self._pulse_cancel:
                                 self._pulse_cancel()
                                 self._pulse_cancel = None
                             self._pulse_phase = "off"
+                            self._phase_started_at = time.monotonic()
                             self._schedule_pulse_timer()
                     heat_call = self._pulse_phase == "on"
                     duty_txt = f", {self._current_duty_pct:.0f}% duty" if self._current_duty_pct else ""
