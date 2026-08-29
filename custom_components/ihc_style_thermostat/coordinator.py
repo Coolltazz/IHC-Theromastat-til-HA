@@ -66,6 +66,8 @@ class RoomHeatingCoordinator:
 
         self._room_satisfied: bool | None = None
         self._floor_satisfied: bool | None = None
+        self._room_far_over: bool | None = None
+        self._floor_far_over: bool | None = None
         # Last-observed reading of whichever sensor drives regulation, used
         # to detect "still rising" (residual heat working through a floor
         # slab after the relay closes) before starting a fresh pulse cycle.
@@ -443,12 +445,27 @@ class RoomHeatingCoordinator:
             # within one hysteresis band above their setpoint before we
             # consider pulsing at all; further above than that, there is no
             # need for any heat, pulsed or not.
-            room_near_target = (
-                room_temp is None or room_sp is None or room_temp <= room_sp + band
+            # This needs its own hysteresis, not a single hard-coded
+            # setpoint+band line: a floor sensor that only reports in 0.1°C
+            # steps can sit balanced exactly on that line for hours,
+            # flipping pulse_eligible on every reading. Reuse
+            # _hysteresis_satisfied with a pivot of setpoint+band, so it
+            # takes a full extra band beyond that line before "far over"
+            # latches, and a full band back below it before it releases.
+            self._room_far_over = self._hysteresis_satisfied(
+                room_temp,
+                room_sp + band if room_sp is not None else None,
+                band,
+                self._room_far_over,
             )
-            floor_near_target = (
-                floor_temp is None or floor_sp is None or floor_temp <= floor_sp + band
+            self._floor_far_over = self._hysteresis_satisfied(
+                floor_temp,
+                floor_sp + band if floor_sp is not None else None,
+                band,
+                self._floor_far_over,
             )
+            room_near_target = room_temp is None or room_sp is None or not self._room_far_over
+            floor_near_target = floor_temp is None or floor_sp is None or not self._floor_far_over
             if regulation == "Gulv":
                 pulse_eligible = floor_near_target
             elif regulation == "Rum":
