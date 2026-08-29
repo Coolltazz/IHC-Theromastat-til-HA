@@ -62,7 +62,7 @@ class RoomHeatingCoordinator:
         self._numbers: dict[str, Any] = {}
         self._selects: dict[str, Any] = {}
         self._sensors: dict[str, Any] = {}
-        self._climate: Any = None
+        self._climates: dict[str, Any] = {}
 
         self._room_satisfied: bool | None = None
         self._floor_satisfied: bool | None = None
@@ -134,15 +134,14 @@ class RoomHeatingCoordinator:
     def register_sensor(self, key: str, entity: Any) -> None:
         self._sensors[key] = entity
 
-    def register_climate(self, entity: Any) -> None:
-        self._climate = entity
+    def register_climate(self, target: str, entity: Any) -> None:
+        self._climates[target] = entity
 
-    # -- setters used by the climate entity (the dial only edits the
+    # -- setters used by the climate entities (each dial only edits its own
     # "occupied" setpoint and the forced-off local mode; everything else
     # stays reachable via the dedicated number/select entities) --
-    async def async_set_beboet_setpoint(self, value: float) -> None:
-        regulation = self._select("regulering")
-        key = "setpunkt_gulv_beboet" if regulation == "Gulv" else "setpunkt_rum_beboet"
+    async def async_set_beboet_setpoint(self, target: str, value: float) -> None:
+        key = "setpunkt_gulv_beboet" if target == "gulv" else "setpunkt_rum_beboet"
         entity = self._numbers.get(key)
         if entity:
             await entity.async_set_native_value(value)
@@ -665,12 +664,9 @@ class RoomHeatingCoordinator:
             if sensor and value is not None:
                 sensor.async_update_state(value)
 
-        if self._climate:
-            if regulation == "Gulv":
-                primary_temp, primary_sp = floor_temp, floor_sp
-            else:
-                primary_temp, primary_sp = room_temp, room_sp
-            self._climate.async_update_state(
+        for target, climate_entity in self._climates.items():
+            temp, setpoint = (room_temp, room_sp) if target == "rum" else (floor_temp, floor_sp)
+            climate_entity.async_update_state(
                 mode=mode,
                 # The dial's "Opvarmning"/"Inaktiv" label should reflect
                 # what the relay is actually doing right now, not our
@@ -678,8 +674,8 @@ class RoomHeatingCoordinator:
                 # instant, but this stays correct even if the physical
                 # switch lags behind or gets toggled independently.
                 heat_call=switch_is_on,
-                primary_temp=primary_temp,
-                primary_sp=primary_sp,
+                temp=temp,
+                setpoint=setpoint,
                 room_temp=room_temp,
                 floor_temp=floor_temp,
             )

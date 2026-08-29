@@ -31,6 +31,10 @@
     }
   },
   "entity": {
+    "climate": {
+      "rum": { "name": "Rum" },
+      "gulv": { "name": "Gulv" }
+    },
     "number": {
       "setpunkt_rum_beboet": { "name": "Sætpunkt rum, beboet" },
       "setpunkt_gulv_beboet": { "name": "Sætpunkt gulv, beboet" },

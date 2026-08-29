@@ -31,6 +31,10 @@
     }
   },
   "entity": {
+    "climate": {
+      "rum": { "name": "Room" },
+      "gulv": { "name": "Floor" }
+    },
     "number": {
       "setpunkt_rum_beboet": { "name": "Setpoint room, occupied" },
       "setpunkt_gulv_beboet": { "name": "Setpoint floor, occupied" },
