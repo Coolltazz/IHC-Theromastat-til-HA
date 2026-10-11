@@ -415,6 +415,20 @@ class RoomHeatingCoordinator:
 
         heat_call = False
         status_extra = ""
+        # Set True below whenever this call is the one that *starts* a new
+        # residual-heat observation (baseline := trend_temp). still_rising
+        # was computed above from the previous call's last_seen_temp, which
+        # by now is almost always already equal to this call's trend_temp
+        # (every evaluate() call -- including the pulse timer's own
+        # phase_elapsed callback -- unconditionally syncs last_seen_temp to
+        # trend_temp at the end, whether or not a genuinely new sensor
+        # reading came in). That makes still_rising spuriously False on the
+        # very call that just set baseline == peak == trend_temp, which used
+        # to finalize instantly with observed == 0 -- the thermostat was
+        # "learning" an overshoot of zero every single cycle. Finalizing
+        # needs to wait for at least one later call, once a fresh sensor
+        # reading has actually moved trend_temp away from the baseline.
+        started_overshoot_tracking = False
 
         if mode in (MODE_OFF, MODE_ALARM):
             self._cancel_pulse()
@@ -574,6 +588,7 @@ class RoomHeatingCoordinator:
                             # near the end of this method).
                             self._pending_overshoot_baseline = trend_temp
                             self._pending_overshoot_peak = trend_temp
+                            started_overshoot_tracking = True
                         self._pulse_phase = "off" if self._pulse_phase == "on" else "on"
                         self._phase_started_at = time.monotonic()
                         self._schedule_pulse_timer()
@@ -604,6 +619,7 @@ class RoomHeatingCoordinator:
                             # a state-change event on the heater switch).
                             self._pending_overshoot_baseline = trend_temp
                             self._pending_overshoot_peak = trend_temp
+                            started_overshoot_tracking = True
                             if self._pulse_cancel:
                                 self._pulse_cancel()
                                 self._pulse_cancel = None
@@ -644,7 +660,7 @@ class RoomHeatingCoordinator:
         if self._pending_overshoot_baseline is not None and trend_temp is not None:
             if trend_temp > self._pending_overshoot_peak:
                 self._pending_overshoot_peak = trend_temp
-            if not still_rising:
+            if not still_rising and not started_overshoot_tracking:
                 # Temperature has stopped climbing -- residual heat from the
                 # last ON phase has fully surfaced. Blend the observed
                 # overshoot into the learned estimate.
