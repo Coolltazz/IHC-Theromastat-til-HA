@@ -78,6 +78,11 @@ class RoomHeatingCoordinator:
         # learned pulsvarme_eftervarme_graders once the rise stops.
         self._pending_overshoot_baseline: float | None = None
         self._pending_overshoot_peak: float | None = None
+        # The driving sensor's own last_updated at the point we last confirmed
+        # a genuinely fresh reading for this observation (set when baseline is
+        # created, advanced each time a newer reading comes in). Finalizing is
+        # gated on this moving forward -- see the finalize check for why.
+        self._pending_overshoot_last_updated = None
 
         self._pulse_phase: str | None = None  # None / "on" / "off"
         # time.monotonic() when the current phase began -- enforces
@@ -183,6 +188,17 @@ class RoomHeatingCoordinator:
         if state is None:
             return None
         return state.state
+
+    def _get_last_updated(self, entity_id: str | None):
+        """The driving sensor's own last_updated timestamp, used to tell a
+        genuinely new reading apart from a re-evaluation triggered by some
+        other entity (the heater switch echoing its own state, a window
+        sensor, ...) while the sensor itself hasn't reported anything new.
+        See the eftervarme finalize check for why that distinction matters."""
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        return state.last_updated if state is not None else None
 
     async def async_setup_listeners(self) -> None:
         entities = [self.room_temp_sensor, self.heater_switch]
@@ -384,8 +400,10 @@ class RoomHeatingCoordinator:
         band = self._number("hysterese") or 0.3
         if regulation == "Gulv":
             trend_temp, trend_sp = floor_temp, floor_sp
+            trend_entity_id = self.floor_temp_sensor
         elif regulation == "Rum":
             trend_temp, trend_sp = room_temp, room_sp
+            trend_entity_id = self.room_temp_sensor
         else:  # "Rum og gulv" -- track whichever sensor is actually driving
             # the pulse: the one with the smaller margin above its own
             # setpoint (i.e. not yet overshot / still needing heat). Picking
@@ -401,17 +419,26 @@ class RoomHeatingCoordinator:
             )
             if room_margin is None:
                 trend_temp, trend_sp = floor_temp, floor_sp
+                trend_entity_id = self.floor_temp_sensor
             elif floor_margin is None:
                 trend_temp, trend_sp = room_temp, room_sp
+                trend_entity_id = self.room_temp_sensor
             elif floor_margin < room_margin:
                 trend_temp, trend_sp = floor_temp, floor_sp
+                trend_entity_id = self.floor_temp_sensor
             else:
                 trend_temp, trend_sp = room_temp, room_sp
+                trend_entity_id = self.room_temp_sensor
         still_rising = (
             self._last_seen_temp is not None
             and trend_temp is not None
             and trend_temp > self._last_seen_temp
         )
+        # The driving sensor's own last_updated for this call -- used below to
+        # tell a genuinely new reading apart from a re-evaluation triggered by
+        # something else (heater switch echo, window sensor, ...) while the
+        # sensor itself hasn't reported anything new since baseline.
+        trend_last_updated = self._get_last_updated(trend_entity_id)
 
         heat_call = False
         status_extra = ""
@@ -588,6 +615,7 @@ class RoomHeatingCoordinator:
                             # near the end of this method).
                             self._pending_overshoot_baseline = trend_temp
                             self._pending_overshoot_peak = trend_temp
+                            self._pending_overshoot_last_updated = trend_last_updated
                             started_overshoot_tracking = True
                         self._pulse_phase = "off" if self._pulse_phase == "on" else "on"
                         self._phase_started_at = time.monotonic()
@@ -619,6 +647,7 @@ class RoomHeatingCoordinator:
                             # a state-change event on the heater switch).
                             self._pending_overshoot_baseline = trend_temp
                             self._pending_overshoot_peak = trend_temp
+                            self._pending_overshoot_last_updated = trend_last_updated
                             started_overshoot_tracking = True
                             if self._pulse_cancel:
                                 self._pulse_cancel()
@@ -660,7 +689,25 @@ class RoomHeatingCoordinator:
         if self._pending_overshoot_baseline is not None and trend_temp is not None:
             if trend_temp > self._pending_overshoot_peak:
                 self._pending_overshoot_peak = trend_temp
-            if not still_rising and not started_overshoot_tracking:
+            # still_rising only tells us the current reading isn't higher than
+            # the last one we recorded -- and _last_seen_temp below is synced
+            # on EVERY evaluate() call, including ones with no new sensor data
+            # at all (the heater switch echoing its own state, a window
+            # sensor, a number/select edit, ...). Without this guard, the very
+            # next such call after baseline is set sees an unchanged reading,
+            # reads that as "stopped climbing", and finalizes with
+            # observed == 0 -- which is exactly why eftervarme never actually
+            # learned anything. Only trust "stopped climbing" once the driving
+            # sensor's own last_updated has actually moved past where it was
+            # when this observation started.
+            has_fresh_reading = (
+                trend_last_updated is not None
+                and self._pending_overshoot_last_updated is not None
+                and trend_last_updated > self._pending_overshoot_last_updated
+            )
+            if has_fresh_reading:
+                self._pending_overshoot_last_updated = trend_last_updated
+            if not still_rising and not started_overshoot_tracking and has_fresh_reading:
                 # Temperature has stopped climbing -- residual heat from the
                 # last ON phase has fully surfaced. Blend the observed
                 # overshoot into the learned estimate.
@@ -668,6 +715,7 @@ class RoomHeatingCoordinator:
                 self._adjust_eftervarme(observed)
                 self._pending_overshoot_baseline = None
                 self._pending_overshoot_peak = None
+                self._pending_overshoot_last_updated = None
 
         if trend_temp is not None:
             self._last_seen_temp = trend_temp
