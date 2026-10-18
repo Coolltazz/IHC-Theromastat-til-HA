@@ -101,6 +101,7 @@ Setpoints are always clamped down to the matching max-temperature limit if they'
 | Pulse heating (select) | Enabled | Enabled/Disabled. When disabled, the relay simply sits idle once the setpoint is reached. |
 | Total cycle length | 40 min | Length of one ON+OFF cycle; the ON/OFF split is computed automatically from duty% below. |
 | Minimum phase duration | 8 min | Neither the ON nor OFF phase is ever shorter than this — matches a thermal actuator's own travel time so it always has time to fully open/close before being told to reverse. |
+| Pause after a real heating cycle | 30 min | After a *real* heating cycle ends (room fell below setpoint − hysteresis, heat ran continuously, then was satisfied again), pulse heating holds off starting a fresh ON phase for this long. Gives that cycle's residual-heat measurement (below) a clean window to plateau before pulse heating's own small ON pulses could add extra heat on top of it. Set to 0 to disable the pause. |
 
 ### Pulse heating — weather compensation
 
@@ -118,7 +119,7 @@ Two values the coordinator tunes on its own; not normally meant for routine manu
 | Entity | Default | Description |
 |---|---|---|
 | Adaptive bias | 0.0% | Added on top of the weather-curve duty%. Nudged +3 when a cycle had to hand off to a full heat call (ran too cold), -1 when a cycle held comfortably on its own. |
-| Learned residual heat | 0.0°C | How many degrees the primary sensor typically keeps climbing after the relay closes (most pronounced on floor slabs with a lot of thermal mass). Used to end the ON phase early so the residual rise lands on the setpoint instead of past it. |
+| Learned residual heat | 0.0°C | How many degrees the primary sensor typically keeps climbing after the relay closes (most pronounced on floor slabs with a lot of thermal mass). Only measured after a *real* heating cycle ends, never from pulse heating's own near-setpoint pulses (see the pause above) — used to end a pulse ON phase early so the residual rise lands on the setpoint instead of past it. |
 
 ### Status (read-only)
 

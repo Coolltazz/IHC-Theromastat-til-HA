@@ -72,11 +72,20 @@ NUMBER_DEFS = {
     # Learned residual-heat overshoot: how many degrees this room's primary
     # sensor typically keeps climbing *after* the relay closes (thermal
     # lag/mass -- most pronounced in floor slabs). Nudged by the coordinator
-    # after each pulse cycle (see _adjust_eftervarme) and used to end the ON
-    # phase that much early, so the residual rise lands on the setpoint
-    # instead of past it. Starts at 0 (no correction) and learns over a
-    # handful of cycles.
+    # only after a *real* heating cycle ends (hysteresis dropped below
+    # setpoint, heat_call ran, then target_satisfied again -- see
+    # _adjust_eftervarme) -- never from pulsvarme's own near-setpoint
+    # maintenance pulsing, which only *uses* this value (to end its ON phase
+    # that much early, so the residual rise lands on the setpoint instead of
+    # past it) without feeding back into it. Starts at 0 (no correction) and
+    # learns over a handful of real cycles.
     "pulsvarme_eftervarme_graders": (0.0, 0.0, 5.0, 0.1, "°C", "mdi:thermometer-chevron-up"),
+    # How long pulsvarme must hold off after a real heating cycle ends before
+    # it's allowed to start its own near-setpoint maintenance pulsing. Gives
+    # that cycle's residual-heat measurement (above) time to plateau cleanly
+    # before pulsvarme's own small ON pulses could add extra heat and skew
+    # it. 0 disables the pause entirely.
+    "pulsvarme_pause_efter_cyklus_min": (30.0, 0.0, 120.0, 1.0, "min", "mdi:timer-sand"),
 }
 
 # key -> (options, default, icon)
