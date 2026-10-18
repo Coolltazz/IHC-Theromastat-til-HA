@@ -83,6 +83,16 @@ class RoomHeatingCoordinator:
         # created, advanced each time a newer reading comes in). Finalizing is
         # gated on this moving forward -- see the finalize check for why.
         self._pending_overshoot_last_updated = None
+        # Whether the *previous* async_evaluate() call was in the real
+        # (hysteresis-triggered, "not target_satisfied") heat-call branch --
+        # used to detect the moment a real cycle ends, which is the only
+        # thing eftervarme learns from (see async_evaluate).
+        self._real_heat_active: bool = False
+        # time.monotonic() a real cycle last ended -- pulsvarme holds off
+        # starting a fresh ON phase for pulsvarme_pause_efter_cyklus_min
+        # minutes after this, so its own pulses can't creep in and skew the
+        # residual-heat observation above while it's still settling.
+        self._real_cycle_ended_at: float | None = None
 
         self._pulse_phase: str | None = None  # None / "on" / "off"
         # time.monotonic() when the current phase began -- enforces
@@ -316,6 +326,64 @@ class RoomHeatingCoordinator:
         if entity.hass is not None:
             entity.async_write_ha_state()
 
+    def _note_real_heat_transition(
+        self, in_real_heat_branch: bool, trend_temp: float | None, trend_last_updated
+    ) -> bool:
+        """Called once per async_evaluate() call with whether *this* call is
+        in the real (hysteresis-triggered, "not target_satisfied") heat-call
+        branch. Detects the moment a real cycle ends (self._real_heat_active
+        True -> in_real_heat_branch False) and starts a fresh residual-heat
+        observation right then.
+
+        Must run BEFORE pulsvarme's own pulse-eligibility logic for this same
+        call -- it's what sets self._real_cycle_ended_at, and
+        pulsvarme_pause_efter_cyklus_min (_pause_after_real_cycle_active)
+        needs that to already reflect "just now" on the very call the real
+        cycle ends, not one call later.
+
+        Returns True if this call just started tracking (the caller folds
+        this into started_overshoot_tracking, same as the pulse-cutoff sites
+        used to before they stopped feeding eftervarme)."""
+        started = False
+        if self._real_heat_active and not in_real_heat_branch:
+            self._real_cycle_ended_at = time.monotonic()
+            if trend_temp is not None:
+                self._pending_overshoot_baseline = trend_temp
+                self._pending_overshoot_peak = trend_temp
+                self._pending_overshoot_last_updated = trend_last_updated
+                started = True
+        elif (
+            not self._real_heat_active
+            and in_real_heat_branch
+            and self._pending_overshoot_baseline is not None
+        ):
+            # A new real cycle is starting (hysteresis dropped below setpoint
+            # again) while the previous one's residual-heat observation
+            # hadn't finished settling yet -- the hysteresis band normally
+            # prevents this kind of quick back-to-back cycling, but if it
+            # happens anyway, actively heating again would swamp whatever
+            # pure residual drift was left to measure. Discard the
+            # unfinished observation rather than let active heat get
+            # mistaken for residual heat and skew the learned value.
+            self._pending_overshoot_baseline = None
+            self._pending_overshoot_peak = None
+            self._pending_overshoot_last_updated = None
+        self._real_heat_active = in_real_heat_branch
+        return started
+
+    def _pause_after_real_cycle_active(self) -> bool:
+        """True while pulsvarme should hold off starting a fresh ON phase
+        because a real heating cycle ended too recently -- see
+        pulsvarme_pause_efter_cyklus_min in const.py."""
+        if self._real_cycle_ended_at is None:
+            return False
+        pause_min = self._number("pulsvarme_pause_efter_cyklus_min")
+        if pause_min is None:
+            pause_min = 30.0
+        if pause_min <= 0:
+            return False
+        return (time.monotonic() - self._real_cycle_ended_at) < pause_min * 60.0
+
     def _schedule_pulse_timer(self) -> None:
         if self._pulse_cancel:
             self._pulse_cancel()
@@ -460,6 +528,12 @@ class RoomHeatingCoordinator:
         if mode in (MODE_OFF, MODE_ALARM):
             self._cancel_pulse()
             heat_call = False
+            # Not the real heat-call branch -- if it was active last call,
+            # this ends it just as much as target_satisfied would (see
+            # _note_real_heat_transition).
+            started_overshoot_tracking = self._note_real_heat_transition(
+                False, trend_temp, trend_last_updated
+            )
         else:
             self._room_satisfied = self._hysteresis_satisfied(
                 room_temp, room_sp, band, self._room_satisfied
@@ -530,6 +604,19 @@ class RoomHeatingCoordinator:
                 max_room is not None and room_temp is not None and room_temp >= max_room
             ) or (max_floor is not None and floor_temp is not None and floor_temp >= max_floor)
 
+            # "en rigtig cyklus" -- a real, hysteresis-triggered heat call --
+            # is exactly the elif not target_satisfied branch below (mirrors
+            # its own condition, incl. max_blocked taking priority over it).
+            # Checked here, before pulse_eligible is acted on below, so that
+            # if a real cycle just ended this very call, pulsvarme's own
+            # "should I start a new ON phase" decision a few lines down
+            # already sees the fresh self._real_cycle_ended_at and holds off
+            # immediately -- not one call too late.
+            in_real_heat_branch = not max_blocked and not target_satisfied
+            started_overshoot_tracking = self._note_real_heat_transition(
+                in_real_heat_branch, trend_temp, trend_last_updated
+            )
+
             if max_blocked:
                 self._cancel_pulse()
                 heat_call = False
@@ -569,12 +656,23 @@ class RoomHeatingCoordinator:
                 if pulsvarme != "Aktiveret":
                     self._cancel_pulse()
                     heat_call = False
-                elif self._pulse_phase is None and still_rising:
+                elif self._pulse_phase is None and (
+                    still_rising or self._pause_after_real_cycle_active()
+                ):
                     # A floor slab keeps releasing residual heat for well
                     # after the relay closes -- if the temperature is still
                     # climbing from a previous cycle, starting a fresh ON
                     # phase now just compounds that overshoot. Hold off and
                     # let it plateau; the next sensor update re-checks this.
+                    #
+                    # Also hold off for pulsvarme_pause_efter_cyklus_min
+                    # minutes after a *real* heating cycle ended, even once
+                    # still_rising has already cleared -- that cycle's
+                    # eftervarme observation (see the finalize check near the
+                    # end of this method) needs a clean, pulsvarme-free
+                    # window to settle in, or pulsvarme's own small ON pulses
+                    # would add extra heat on top of pure residual heat and
+                    # skew what gets learned.
                     heat_call = False
                     status_extra = " (Afventer eftervarme)"
                 else:
@@ -608,15 +706,10 @@ class RoomHeatingCoordinator:
                             # A full cycle completed without a genuine heat
                             # call taking over -- held fine, ease off a bit.
                             self._adjust_bias(-1.0)
-                        elif self._pulse_phase == "on":
-                            # ON phase ending naturally -- start tracking how
-                            # far residual heat pushes the temperature from
-                            # here before it plateaus (see the finalize check
-                            # near the end of this method).
-                            self._pending_overshoot_baseline = trend_temp
-                            self._pending_overshoot_peak = trend_temp
-                            self._pending_overshoot_last_updated = trend_last_updated
-                            started_overshoot_tracking = True
+                        # ON -> OFF is just a phase toggle now -- pulsvarme's
+                        # own cycles no longer feed eftervarme (see the real-
+                        # cycle-end tracking below); they only ever *use* the
+                        # already-learned value to end an ON phase early.
                         self._pulse_phase = "off" if self._pulse_phase == "on" else "on"
                         self._phase_started_at = time.monotonic()
                         self._schedule_pulse_timer()
@@ -645,10 +738,9 @@ class RoomHeatingCoordinator:
                             # how many times we get re-evaluated in the
                             # meantime (e.g. our own turn_on echoing back as
                             # a state-change event on the heater switch).
-                            self._pending_overshoot_baseline = trend_temp
-                            self._pending_overshoot_peak = trend_temp
-                            self._pending_overshoot_last_updated = trend_last_updated
-                            started_overshoot_tracking = True
+                            # This cutoff only *uses* the learned eftervarme
+                            # value -- it doesn't start a new observation;
+                            # pulsvarme cycles no longer feed eftervarme.
                             if self._pulse_cancel:
                                 self._pulse_cancel()
                                 self._pulse_cancel = None
@@ -658,6 +750,10 @@ class RoomHeatingCoordinator:
                     heat_call = self._pulse_phase == "on"
                     duty_txt = f", {self._current_duty_pct:.0f}% duty" if self._current_duty_pct else ""
                     status_extra = f" (Pulsvarme: {self._pulse_phase.upper()}{duty_txt})"
+
+        # (Real-cycle-end detection for eftervarme happens earlier, before
+        # pulsvarme's own pulse-eligibility logic runs -- see
+        # _note_real_heat_transition.)
 
         # Compare against the heater switch's actual reported state rather
         # than an internally-cached "last sent" value. On HA startup the KNX

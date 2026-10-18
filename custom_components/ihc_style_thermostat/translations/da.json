@@ -51,7 +51,8 @@
       "pulsvarme_duty_min": { "name": "Pulsvarme: min. duty" },
       "pulsvarme_duty_max": { "name": "Pulsvarme: max. duty" },
       "pulsvarme_adaptiv_bias": { "name": "Pulsvarme: adaptiv bias (selvjusteres)" },
-      "pulsvarme_eftervarme_graders": { "name": "Pulsvarme: lært eftervarme (selvjusteres)" }
+      "pulsvarme_eftervarme_graders": { "name": "Pulsvarme: lært eftervarme (selvjusteres)" },
+      "pulsvarme_pause_efter_cyklus_min": { "name": "Pulsvarme: pause efter en rigtig varmecyklus" }
     },
     "select": {
       "regulering": { "name": "Reguleringsform" },
