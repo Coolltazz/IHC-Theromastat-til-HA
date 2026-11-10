@@ -25,6 +25,8 @@
           "window_sensor": "Window/door contact sensor (optional)",
           "house_mode_entity": "House mode select entity (optional)",
           "outdoor_temp_entity": "Outdoor \"feels like\" temperature sensor (optional, for weather-compensated pulse heating)",
+          "wind_speed_entity": "Wind speed sensor (optional, learns a wind duty% top-up -- see vind_lav/vind_hoej)",
+          "solar_entity": "Sun/light-level sensor (optional, learns a sun duty% discount -- see sol_lav/sol_hoej)",
           "window_delay_minutes": "Window-open delay before cutting heat (minutes)"
         }
       }
@@ -52,7 +54,13 @@
       "pulsvarme_duty_max": { "name": "Pulse heating: maximum duty" },
       "pulsvarme_adaptiv_bias": { "name": "Pulse heating: adaptive bias (auto-tuned)" },
       "pulsvarme_eftervarme_graders": { "name": "Pulse heating: learned residual heat (auto-tuned)" },
-      "pulsvarme_pause_efter_cyklus_min": { "name": "Pulse heating: pause after a real heating cycle" }
+      "pulsvarme_pause_efter_cyklus_min": { "name": "Pulse heating: pause after a real heating cycle" },
+      "vind_lav": { "name": "Pulse heating: wind factor, calm threshold" },
+      "vind_hoej": { "name": "Pulse heating: wind factor, windy threshold" },
+      "pulsvarme_vind_faktor": { "name": "Pulse heating: wind duty top-up (auto-tuned)" },
+      "sol_lav": { "name": "Pulse heating: sun factor, overcast threshold" },
+      "sol_hoej": { "name": "Pulse heating: sun factor, bright threshold" },
+      "pulsvarme_sol_faktor": { "name": "Pulse heating: sun duty discount (auto-tuned)" }
     },
     "select": {
       "regulering": { "name": "Regulation mode" },

@@ -53,6 +53,8 @@ Each config entry wires up:
 | Window/door contact | no | `binary_sensor.*` |
 | House mode entity | no | Any `select`/`input_select` with values like `Beboet`/`Ubeboet`/`Frostsikring`/`Gæster` |
 | Outdoor "feels like" sensor | no | `sensor.*`, `device_class: temperature`. Powers the weather-compensated pulse duty cycle; without it, pulse heating falls back to the midpoint between min/max duty. |
+| Wind speed sensor | no | Any `sensor.*` reporting wind speed in its own unit. Powers a learned wind duty% top-up — see [Pulse heating — wind & sun](#pulse-heating--wind--sun). Without it, the wind term is always 0. |
+| Sun/light-level sensor | no | Any `sensor.*` reporting light/solar intensity (lux, W/m², UV index, ...) in its own unit. Powers a learned sun duty% discount — see below. Without it, the sun term is always 0. |
 
 Everything else (setpoints, hysteresis, max-temp limits, regulation mode,
 priority, local override, pulse heating on/off + durations + the two
@@ -112,13 +114,26 @@ Setpoints are always clamped down to the matching max-temperature limit if they'
 | Minimum duty | 15% | Lowest ON share of the cycle, no matter how mild it gets. |
 | Maximum duty | 90% | Highest ON share of the cycle, no matter how cold it gets. |
 
-### Pulse heating — adaptive learning
+### Pulse heating — wind & sun
 
-Two values the coordinator tunes on its own; not normally meant for routine manual editing, but they're real entities so you can watch or reset them.
+Only active when the matching sensor (above) is configured; with neither set, these six entities exist but never affect anything. `vind_lav`/`vind_hoej` and `sol_lav`/`sol_hoej` are in that sensor's own unit (e.g. m/s, lux) — there's no unit conversion, so set them to match what your sensor actually reports.
 
 | Entity | Default | Description |
 |---|---|---|
-| Adaptive bias | 0.0% | Added on top of the weather-curve duty%. Nudged +3 when a cycle had to hand off to a full heat call (ran too cold), -1 when a cycle held comfortably on its own. |
+| Wind factor, calm threshold | 0 (sensor unit) | At or below this wind reading, the wind term is 0. |
+| Wind factor, windy threshold | 6 (sensor unit) | At or above this wind reading, the full wind duty top-up (below) applies. Linearly scaled in between. |
+| Wind duty top-up | 0.0% | **Learned.** Extra duty% added while wind is in the calm..windy range. Nudged up when a cycle fell through to a real heat call while windy (wind likely cost extra heat), nudged back down when a windy cycle held fine anyway. Starts at 0 — only grows if windy conditions actually correlate with needing more heat. |
+| Sun factor, overcast threshold | 2000 (sensor unit) | At or below this light reading, the sun term is 0. |
+| Sun factor, bright threshold | 15000 (sensor unit) | At or above this light reading, the full sun duty discount (below) applies. Linearly scaled in between. |
+| Sun duty discount | 0.0% | **Learned.** Duty% subtracted while sun/light is in the overcast..bright range. Nudged up when a cycle held fine (or better) while sunny — free solar heat likely helped — nudged back down when a sunny cycle still fell through. Starts at 0 — only grows if sun actually correlates with needing less heat. |
+
+### Pulse heating — adaptive learning
+
+Two more values the coordinator tunes on its own; not normally meant for routine manual editing, but they're real entities so you can watch or reset them.
+
+| Entity | Default | Description |
+|---|---|---|
+| Adaptive bias | 0.0% | Added on top of the weather-curve duty% (and the wind/sun terms above). Nudged +3 when a cycle had to hand off to a full heat call (ran too cold), -1 when a cycle held comfortably on its own. |
 | Learned residual heat | 0.0°C | How many degrees the primary sensor typically keeps climbing after the relay closes (most pronounced on floor slabs with a lot of thermal mass). Only measured after a *real* heating cycle ends, never from pulse heating's own near-setpoint pulses (see the pause above) — used to end a pulse ON phase early so the residual rise lands on the setpoint instead of past it. |
 
 ### Status (read-only)
