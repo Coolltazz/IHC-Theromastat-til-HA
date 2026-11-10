@@ -34,6 +34,8 @@ from .const import (
     CONF_HOUSE_MODE_ENTITY,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOM_TEMP_SENSOR,
+    CONF_SOLAR_ENTITY,
+    CONF_WIND_SPEED_ENTITY,
     CONF_WINDOW_SENSOR,
     DEFAULT_WINDOW_DELAY_MINUTES,
     DOMAIN,
@@ -116,6 +118,22 @@ class IhcStyleThermostatOptionsFlow(OptionsFlow):
             ] = outdoor_temp_selector
         else:
             schema_dict[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = outdoor_temp_selector
+
+        wind_speed_selector = EntitySelector(EntitySelectorConfig(domain="sensor"))
+        if options.get(CONF_WIND_SPEED_ENTITY):
+            schema_dict[
+                vol.Optional(CONF_WIND_SPEED_ENTITY, default=options[CONF_WIND_SPEED_ENTITY])
+            ] = wind_speed_selector
+        else:
+            schema_dict[vol.Optional(CONF_WIND_SPEED_ENTITY)] = wind_speed_selector
+
+        solar_selector = EntitySelector(EntitySelectorConfig(domain="sensor"))
+        if options.get(CONF_SOLAR_ENTITY):
+            schema_dict[
+                vol.Optional(CONF_SOLAR_ENTITY, default=options[CONF_SOLAR_ENTITY])
+            ] = solar_selector
+        else:
+            schema_dict[vol.Optional(CONF_SOLAR_ENTITY)] = solar_selector
 
         schema_dict[
             vol.Required(

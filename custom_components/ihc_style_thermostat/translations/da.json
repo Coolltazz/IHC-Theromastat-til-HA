@@ -25,6 +25,8 @@
           "window_sensor": "Vindue/dør-kontakt (valgfri)",
           "house_mode_entity": "Husets tilstand (select, valgfri)",
           "outdoor_temp_entity": "Udendørs \"føles som\"-temperatursensor (valgfri, til vejrkompenseret pulsvarme)",
+          "wind_speed_entity": "Vindhastighed-sensor (valgfri, lærer et vind-duty-tillæg -- se vind_lav/vind_hoej)",
+          "solar_entity": "Sol/lys-sensor (valgfri, lærer en sol-duty-rabat -- se sol_lav/sol_hoej)",
           "window_delay_minutes": "Forsinkelse før varme afbrydes ved åbent vindue (minutter)"
         }
       }
@@ -52,7 +54,13 @@
       "pulsvarme_duty_max": { "name": "Pulsvarme: max. duty" },
       "pulsvarme_adaptiv_bias": { "name": "Pulsvarme: adaptiv bias (selvjusteres)" },
       "pulsvarme_eftervarme_graders": { "name": "Pulsvarme: lært eftervarme (selvjusteres)" },
-      "pulsvarme_pause_efter_cyklus_min": { "name": "Pulsvarme: pause efter en rigtig varmecyklus" }
+      "pulsvarme_pause_efter_cyklus_min": { "name": "Pulsvarme: pause efter en rigtig varmecyklus" },
+      "vind_lav": { "name": "Pulsvarme: vindfaktor, stille-tærskel" },
+      "vind_hoej": { "name": "Pulsvarme: vindfaktor, blæsende-tærskel" },
+      "pulsvarme_vind_faktor": { "name": "Pulsvarme: vind-duty-tillæg (selvjusteres)" },
+      "sol_lav": { "name": "Pulsvarme: solfaktor, overskyet-tærskel" },
+      "sol_hoej": { "name": "Pulsvarme: solfaktor, klar-sol-tærskel" },
+      "pulsvarme_sol_faktor": { "name": "Pulsvarme: sol-duty-rabat (selvjusteres)" }
     },
     "select": {
       "regulering": { "name": "Reguleringsform" },

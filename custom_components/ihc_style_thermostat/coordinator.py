@@ -20,6 +20,8 @@ from .const import (
     CONF_HOUSE_MODE_ENTITY,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOM_TEMP_SENSOR,
+    CONF_SOLAR_ENTITY,
+    CONF_WIND_SPEED_ENTITY,
     CONF_WINDOW_SENSOR,
     DEFAULT_WINDOW_DELAY_MINUTES,
     HOUSE_MODE_MAP,
@@ -56,6 +58,12 @@ class RoomHeatingCoordinator:
         self.window_sensor: str | None = None
         self.house_mode_entity: str | None = None
         self.outdoor_temp_entity: str | None = None
+        # Optional wind-speed / solar(-light) sensors for the vind-faktor /
+        # sol-faktor refinement of the duty% formula (see
+        # _compute_duty_percent). Either, both, or neither may be set --
+        # with an entity unset, that term is simply always 0.
+        self.wind_speed_entity: str | None = None
+        self.solar_entity: str | None = None
         self.window_delay_minutes: float = DEFAULT_WINDOW_DELAY_MINUTES
         self._read_options()
 
@@ -123,6 +131,10 @@ class RoomHeatingCoordinator:
         self.outdoor_temp_entity = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(
             CONF_OUTDOOR_TEMP_ENTITY
         )
+        self.wind_speed_entity = options.get(CONF_WIND_SPEED_ENTITY) or data.get(
+            CONF_WIND_SPEED_ENTITY
+        )
+        self.solar_entity = options.get(CONF_SOLAR_ENTITY) or data.get(CONF_SOLAR_ENTITY)
         self.window_delay_minutes = options.get(
             OPTION_WINDOW_DELAY_MINUTES, DEFAULT_WINDOW_DELAY_MINUTES
         )
@@ -266,11 +278,39 @@ class RoomHeatingCoordinator:
         self._cycle_on_minutes = None
         self._cycle_off_minutes = None
 
-    def _compute_duty_percent(self) -> tuple[float, float, float]:
+    def _fraction_between(
+        self, value: float | None, low: float | None, high: float | None
+    ) -> float:
+        """0..1 linear scale of value between low and high (clamped), or 0 if
+        any input is missing/degenerate. Shared by the outdoor-temp
+        feedforward and the wind/sun terms below."""
+        if value is None or low is None or high is None or high <= low:
+            return 0.0
+        return max(0.0, min(1.0, (value - low) / (high - low)))
+
+    def _wind_fraction(self) -> float:
+        """0..1: how far current wind speed sits between vind_lav and
+        vind_hoej. Always 0 if no wind_speed_entity is configured."""
+        if not self.wind_speed_entity:
+            return 0.0
+        wind = self._get_float(self.wind_speed_entity)
+        return self._fraction_between(wind, self._number("vind_lav"), self._number("vind_hoej"))
+
+    def _sol_fraction(self) -> float:
+        """0..1: how far current sun/light level sits between sol_lav and
+        sol_hoej. Always 0 if no solar_entity is configured."""
+        if not self.solar_entity:
+            return 0.0
+        sol = self._get_float(self.solar_entity)
+        return self._fraction_between(sol, self._number("sol_lav"), self._number("sol_hoej"))
+
+    def _compute_duty_percent(self) -> tuple[float, float, float, float, float]:
         """Weather-compensated ON share (%) of the pulse cycle, plus a
         slowly self-adjusting bias trimmed by how well past cycles actually
-        held the temperature (see async_adjust_bias). Returns
-        (duty, feedforward_duty, bias)."""
+        held the temperature (see _adjust_bias), and two further learned
+        terms for wind (added) and sun/light (subtracted) -- see
+        _adjust_vind_faktor / _adjust_sol_faktor. Returns
+        (duty, feedforward_duty, bias, wind_term, sol_term)."""
         outdoor = self._get_float(self.outdoor_temp_entity) if self.outdoor_temp_entity else None
         t_low = self._number("ude_temp_lav")
         t_high = self._number("ude_temp_hoej")
@@ -288,9 +328,14 @@ class RoomHeatingCoordinator:
             fraction = max(0.0, min(1.0, fraction))
             duty_ff = duty_min + fraction * (duty_max - duty_min)
 
+        vind_faktor = self._number("pulsvarme_vind_faktor") or 0.0
+        wind_term = self._wind_fraction() * vind_faktor
+        sol_faktor = self._number("pulsvarme_sol_faktor") or 0.0
+        sol_term = self._sol_fraction() * sol_faktor
+
         bias = self._number("pulsvarme_adaptiv_bias") or 0.0
-        duty = max(duty_min, min(duty_max, duty_ff + bias))
-        return duty, duty_ff, bias
+        duty = max(duty_min, min(duty_max, duty_ff + wind_term - sol_term + bias))
+        return duty, duty_ff, bias, wind_term, sol_term
 
     def _adjust_bias(self, delta: float) -> None:
         """Nudges the persisted adaptive bias (percentage points). Positive
@@ -306,6 +351,36 @@ class RoomHeatingCoordinator:
         bias = entity.native_value or 0.0
         bias = max(-30.0, min(30.0, bias + delta))
         entity._attr_native_value = round(bias, 1)  # noqa: SLF001 -- internal coordinator<->entity link
+        if entity.hass is not None:
+            entity.async_write_ha_state()
+
+    def _adjust_vind_faktor(self, delta: float) -> None:
+        """Nudges the learned wind-duty% factor (percentage points, clamped
+        0..20 -- wind only ever ADDS duty, never removes it). Called from
+        the same two spots as _adjust_bias, but only when wind was actually
+        in its "high" zone (vind_fraction > 0.3) at that moment -- see
+        async_evaluate. Same direct-write pattern as _adjust_bias."""
+        entity = self._numbers.get("pulsvarme_vind_faktor")
+        if entity is None:
+            return
+        value = entity.native_value or 0.0
+        value = max(0.0, min(20.0, value + delta))
+        entity._attr_native_value = round(value, 1)  # noqa: SLF001 -- internal coordinator<->entity link
+        if entity.hass is not None:
+            entity.async_write_ha_state()
+
+    def _adjust_sol_faktor(self, delta: float) -> None:
+        """Nudges the learned sun-duty% factor (percentage points, clamped
+        0..30 -- sun only ever SUBTRACTS duty, never adds it). Called from
+        the same two spots as _adjust_bias, but only when sun/light was
+        actually in its "high" zone (sol_fraction > 0.3) at that moment --
+        see async_evaluate. Same direct-write pattern as _adjust_bias."""
+        entity = self._numbers.get("pulsvarme_sol_faktor")
+        if entity is None:
+            return
+        value = entity.native_value or 0.0
+        value = max(0.0, min(30.0, value + delta))
+        entity._attr_native_value = round(value, 1)  # noqa: SLF001 -- internal coordinator<->entity link
         if entity.hass is not None:
             entity.async_write_ha_state()
 
@@ -628,6 +703,16 @@ class RoomHeatingCoordinator:
                     # React faster than we ease off (better too warm than
                     # too cold).
                     self._adjust_bias(3.0)
+                    # Attribute part of that shortfall to wind/sun if either
+                    # was actually in its "high" zone right now: windy and
+                    # still fell through -> lean on more wind-duty next
+                    # time. Sunny and still fell through -> the sun wasn't
+                    # actually helping as much as currently assumed, ease
+                    # the sol-faktor back down.
+                    if self._wind_fraction() > 0.3:
+                        self._adjust_vind_faktor(0.5)
+                    if self._sol_fraction() > 0.3:
+                        self._adjust_sol_faktor(-0.3)
                 self._cancel_pulse()
                 heat_call = True
             elif not pulse_eligible:
@@ -678,7 +763,7 @@ class RoomHeatingCoordinator:
                 else:
                     if self._pulse_phase is None:
                         cycle_minutes = self._number("pulsvarme_cyklus_min") or 40
-                        duty_pct, duty_ff, bias = self._compute_duty_percent()
+                        duty_pct, duty_ff, bias, wind_term, sol_term = self._compute_duty_percent()
                         self._current_duty_pct = duty_pct
                         # Never let a phase run shorter than the actuator's
                         # own travel time -- otherwise it gets told to close
@@ -692,12 +777,14 @@ class RoomHeatingCoordinator:
                         self._phase_started_at = time.monotonic()
                         self._schedule_pulse_timer()
                         _LOGGER.info(
-                            "%s: new pulse cycle -- duty=%.0f%% (weather=%.0f%%, bias=%+.1f), "
-                            "ON=%.1fmin OFF=%.1fmin",
+                            "%s: new pulse cycle -- duty=%.0f%% (weather=%.0f%%, bias=%+.1f, "
+                            "wind=%+.1f, sol=%+.1f), ON=%.1fmin OFF=%.1fmin",
                             self.entry.title,
                             duty_pct,
                             duty_ff,
                             bias,
+                            wind_term,
+                            -sol_term,
                             self._cycle_on_minutes,
                             self._cycle_off_minutes,
                         )
@@ -706,6 +793,15 @@ class RoomHeatingCoordinator:
                             # A full cycle completed without a genuine heat
                             # call taking over -- held fine, ease off a bit.
                             self._adjust_bias(-1.0)
+                            # Sunny and it held fine (or better) -- free
+                            # solar heat likely helped, lean on it a bit
+                            # more next time. Windy and it STILL held fine
+                            # despite the wind -- that wind wasn't actually
+                            # costing extra heat, ease the vind-faktor back.
+                            if self._sol_fraction() > 0.3:
+                                self._adjust_sol_faktor(0.3)
+                            if self._wind_fraction() > 0.3:
+                                self._adjust_vind_faktor(-0.2)
                         # ON -> OFF is just a phase toggle now -- pulsvarme's
                         # own cycles no longer feed eftervarme (see the real-
                         # cycle-end tracking below); they only ever *use* the

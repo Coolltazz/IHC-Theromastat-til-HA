@@ -8,6 +8,8 @@ CONF_HEATER_SWITCH = "heater_switch"
 CONF_WINDOW_SENSOR = "window_sensor"
 CONF_HOUSE_MODE_ENTITY = "house_mode_entity"
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"
+CONF_WIND_SPEED_ENTITY = "wind_speed_entity"
+CONF_SOLAR_ENTITY = "solar_entity"
 
 OPTION_WINDOW_DELAY_MINUTES = "window_delay_minutes"
 DEFAULT_WINDOW_DELAY_MINUTES = 10
@@ -86,6 +88,34 @@ NUMBER_DEFS = {
     # before pulsvarme's own small ON pulses could add extra heat and skew
     # it. 0 disables the pause entirely.
     "pulsvarme_pause_efter_cyklus_min": (30.0, 0.0, 120.0, 1.0, "min", "mdi:timer-sand"),
+    # Wind/sun refinement of the weather-compensated duty% above (see
+    # coordinator.py _compute_duty_percent / _adjust_vind_faktor /
+    # _adjust_sol_faktor). Only active when the matching
+    # wind_speed_entity / solar_entity is configured in Options -- with
+    # neither set, these four numbers exist but never affect anything.
+    #
+    # vind_lav/vind_hoej mark the wind-speed range (same entity's own
+    # unit, e.g. m/s) over which pulsvarme_vind_faktor's extra duty% is
+    # scaled in -- 0 at/below vind_lav, full faktor at/above vind_hoej.
+    "vind_lav": (0.0, 0.0, 20.0, 0.5, "m/s", "mdi:weather-windy"),
+    "vind_hoej": (6.0, 0.0, 30.0, 0.5, "m/s", "mdi:weather-windy-variant"),
+    # Learned extra duty% added on top of the weather compensation while
+    # wind is in the vind_lav..vind_hoej range -- nudged up when a cycle
+    # fell through to a real heat call while windy, nudged back down when
+    # a windy cycle held fine anyway. Starts at 0 (no effect) and only
+    # grows if windy conditions actually correlate with needing more heat.
+    "pulsvarme_vind_faktor": (0.0, 0.0, 20.0, 0.1, "%", "mdi:weather-windy"),
+    # sol_lav/sol_hoej mark the solar/light-level range (same entity's own
+    # unit, e.g. lx) over which pulsvarme_sol_faktor's duty% reduction is
+    # scaled in -- 0 at/below sol_lav, full faktor at/above sol_hoej.
+    "sol_lav": (2000.0, 0.0, 10000.0, 100.0, "lx", "mdi:weather-cloudy"),
+    "sol_hoej": (15000.0, 0.0, 50000.0, 500.0, "lx", "mdi:weather-sunny"),
+    # Learned duty% SUBTRACTED while sun/light is in the sol_lav..sol_hoej
+    # range -- nudged up when a cycle held fine (or better) while sunny
+    # (free solar heat helped), nudged back down when a sunny cycle still
+    # fell through anyway. Starts at 0 and only grows if sun actually
+    # correlates with needing less heat.
+    "pulsvarme_sol_faktor": (0.0, 0.0, 30.0, 0.1, "%", "mdi:weather-sunny"),
 }
 
 # key -> (options, default, icon)
