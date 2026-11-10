@@ -40,13 +40,13 @@ PULSVARME_OPTIONS = ["Aktiveret", "Ikke Aktiveret"]
 
 # key -> (default, min, max, step, unit, icon)
 NUMBER_DEFS = {
-    "setpunkt_rum_beboet": (21.0, 10.0, 30.0, 0.5, "°C", "mdi:home-thermometer"),
-    "setpunkt_gulv_beboet": (24.0, 10.0, 35.0, 0.5, "°C", "mdi:heating-coil"),
-    "setpunkt_ubeboet": (17.0, 5.0, 25.0, 0.5, "°C", "mdi:home-minus"),
-    "setpunkt_gaest_nat": (19.0, 5.0, 25.0, 0.5, "°C", "mdi:weather-night"),
-    "setpunkt_frost": (7.0, 0.0, 15.0, 0.5, "°C", "mdi:snowflake"),
-    "max_temp_rum": (26.0, 20.0, 35.0, 0.5, "°C", "mdi:thermometer-alert"),
-    "max_temp_gulv": (30.0, 20.0, 40.0, 0.5, "°C", "mdi:thermometer-alert"),
+    "setpunkt_rum_beboet": (21.0, 10.0, 30.0, 0.1, "°C", "mdi:home-thermometer"),
+    "setpunkt_gulv_beboet": (24.0, 10.0, 35.0, 0.1, "°C", "mdi:heating-coil"),
+    "setpunkt_ubeboet": (17.0, 5.0, 25.0, 0.1, "°C", "mdi:home-minus"),
+    "setpunkt_gaest_nat": (19.0, 5.0, 25.0, 0.1, "°C", "mdi:weather-night"),
+    "setpunkt_frost": (7.0, 0.0, 15.0, 0.1, "°C", "mdi:snowflake"),
+    "max_temp_rum": (26.0, 20.0, 35.0, 0.1, "°C", "mdi:thermometer-alert"),
+    "max_temp_gulv": (30.0, 20.0, 40.0, 0.1, "°C", "mdi:thermometer-alert"),
     "hysterese": (0.3, 0.1, 3.0, 0.1, "°C", "mdi:sine-wave"),
     # Total pulse-cycle length. The ON/OFF split within it is computed live
     # from the duty% (weather compensation + adaptive bias below) -- there
@@ -64,8 +64,8 @@ NUMBER_DEFS = {
     # meant for routine manual editing -- the coordinator reads/writes it
     # itself, but it must be a real, restorable entity to persist across
     # HA restarts.
-    "ude_temp_lav": (-10.0, -30.0, 10.0, 0.5, "°C", "mdi:snowflake-thermometer"),
-    "ude_temp_hoej": (15.0, 0.0, 25.0, 0.5, "°C", "mdi:thermometer"),
+    "ude_temp_lav": (-10.0, -30.0, 10.0, 0.1, "°C", "mdi:snowflake-thermometer"),
+    "ude_temp_hoej": (15.0, 0.0, 25.0, 0.1, "°C", "mdi:thermometer"),
     "pulsvarme_duty_min": (15.0, 0.0, 100.0, 1.0, "%", "mdi:percent-outline"),
     "pulsvarme_duty_max": (90.0, 0.0, 100.0, 1.0, "%", "mdi:percent"),
     "pulsvarme_adaptiv_bias": (0.0, -30.0, 30.0, 0.1, "%", "mdi:tune"),
