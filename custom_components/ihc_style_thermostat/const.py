@@ -30,7 +30,7 @@ HOUSE_MODE_MAP = {
     "Gæster": MODE_GUEST,
 }
 
-REGULATION_OPTIONS = ["Gulv", "Rum og gulv", "Rum"]
+REGULATION_OPTIONS = ["Gulv", "Rum og gulv", "Rum", "Rum (gulv min.)"]
 PRIORITY_OPTIONS = ["1 temperatur opfyldt", "Begge temperaturer opfyldt"]
 LOCAL_MODE_OPTIONS = [
     "Følger husets tilstand",
@@ -44,6 +44,14 @@ PULSVARME_OPTIONS = ["Aktiveret", "Ikke Aktiveret"]
 NUMBER_DEFS = {
     "setpunkt_rum_beboet": (21.0, 10.0, 30.0, 0.1, "°C", "mdi:home-thermometer"),
     "setpunkt_gulv_beboet": (24.0, 10.0, 35.0, 0.1, "°C", "mdi:heating-coil"),
+    # Only used by regulation mode "Rum (gulv min.)": the floor is not a
+    # regulation target in that mode at all -- it only forces a heat call
+    # if it ever drops below this value (with the usual hysteresis band),
+    # regardless of what the room is doing. Every other number/select in
+    # this file (pulse heating, adaptive bias, residual heat, wind/sun --
+    # see coordinator.py) only ever tracks the ROOM sensor in this mode, so
+    # none of that self-learning is influenced by the floor at all.
+    "gulv_min_temperatur": (18.0, 5.0, 30.0, 0.1, "°C", "mdi:heating-coil"),
     "setpunkt_ubeboet": (17.0, 5.0, 25.0, 0.1, "°C", "mdi:home-minus"),
     "setpunkt_gaest_nat": (19.0, 5.0, 25.0, 0.1, "°C", "mdi:weather-night"),
     "setpunkt_frost": (7.0, 0.0, 15.0, 0.1, "°C", "mdi:snowflake"),

@@ -40,6 +40,7 @@
     "number": {
       "setpunkt_rum_beboet": { "name": "Sætpunkt rum, beboet" },
       "setpunkt_gulv_beboet": { "name": "Sætpunkt gulv, beboet" },
+      "gulv_min_temperatur": { "name": "Gulv minimumstemperatur (regulering: Rum (gulv min.))" },
       "setpunkt_ubeboet": { "name": "Sætpunkt, ubeboet" },
       "setpunkt_gaest_nat": { "name": "Sætpunkt, gæst/nat" },
       "setpunkt_frost": { "name": "Sætpunkt, frostsikring" },

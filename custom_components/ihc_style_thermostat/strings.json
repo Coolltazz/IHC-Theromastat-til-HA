@@ -40,6 +40,7 @@
     "number": {
       "setpunkt_rum_beboet": { "name": "Setpoint room, occupied" },
       "setpunkt_gulv_beboet": { "name": "Setpoint floor, occupied" },
+      "gulv_min_temperatur": { "name": "Floor minimum temperature (regulation mode: Room, floor as minimum)" },
       "setpunkt_ubeboet": { "name": "Setpoint, unoccupied" },
       "setpunkt_gaest_nat": { "name": "Setpoint, guest/night" },
       "setpunkt_frost": { "name": "Setpoint, frost protection" },
