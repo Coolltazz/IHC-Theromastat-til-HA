@@ -80,21 +80,24 @@ Setpoints are always clamped down to the matching max-temperature limit if they'
 | Entity | Default | Description |
 |---|---|---|
 | Setpoint room, occupied | 21.0°C | Room target while house mode is Occupied — the field the dial normally edits. |
-| Setpoint floor, occupied | 24.0°C | Floor target while house mode is Occupied. |
+| Setpoint floor, occupied | 24.0°C | Floor target while house mode is Occupied. Not used at all in "Room (floor as minimum)" mode — see Floor minimum temperature below. |
 | Setpoint, unoccupied | 17.0°C | Shared room+floor target while house mode is Unoccupied. |
 | Setpoint, guest/night | 19.0°C | Used for Guest mode, or forced night setback while the house is occupied. |
 | Setpoint, frost protection | 7.0°C | Minimum target during frost protection or an open window — purely to avoid frost damage. |
 | Max temperature, room | 26.0°C | Hard safety ceiling — heat is forced off if the room reaches this, regardless of everything else. |
 | Max temperature, floor | 30.0°C | Same safety ceiling, for the floor. |
+| Floor minimum temperature | 18.0°C | Only used in regulation mode "Room (floor as minimum)" — see [Regulation & mode](#regulation--mode). Forces a heat call whenever the floor drops below this (with the usual hysteresis), independent of the room. Ignored by every other regulation mode. |
 
 ### Regulation & mode
 
 | Entity | Default | Description |
 |---|---|---|
-| Regulation mode (select) | Room and floor | Floor / Room and floor / Room — which sensor(s) drive the heat call and dial display. |
+| Regulation mode (select) | Room and floor | Floor / Room and floor / Room / **Room (floor as minimum)** — which sensor(s) drive the heat call and dial display. |
 | Priority (select) | 1 temperature satisfied | Only relevant for "Room and floor": whether ONE sensor (OR) or BOTH sensors (AND) must reach setpoint+hysteresis before heat is considered satisfied. |
 | Hysteresis | 0.3°C | Deadband around the setpoint so the relay doesn't chatter on small fluctuations. |
 | Local override (select) | Follow house mode | Follow house mode / Forced off / Forced frost protection / Forced night setback — overrides the shared house mode for this room only. |
+
+**"Room (floor as minimum)"**: the room drives everything — the heat call, the dial, pulse heating, and *all* of its self-learning (adaptive bias, residual heat, the wind/sun duty terms below). The floor isn't a regulation target at all in this mode; it only forces a heat call, regardless of what the room is doing, if it ever drops below **Floor minimum temperature** (a separate entity from "Setpoint floor, occupied", only used by this mode — see [Setpoints](#setpoints)). Only while house mode is Occupied: unoccupied/night/guest/frost still use their own shared, already-reduced setpoint for both sensors, same as every other regulation mode.
 
 ### Pulse heating — basics
 

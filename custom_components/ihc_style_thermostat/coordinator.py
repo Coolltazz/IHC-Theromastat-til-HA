@@ -168,7 +168,18 @@ class RoomHeatingCoordinator:
     # "occupied" setpoint and the forced-off local mode; everything else
     # stays reachable via the dedicated number/select entities) --
     async def async_set_beboet_setpoint(self, target: str, value: float) -> None:
-        key = "setpunkt_gulv_beboet" if target == "gulv" else "setpunkt_rum_beboet"
+        if target == "gulv":
+            # In "Rum (gulv min.)" the floor dial is actually showing/
+            # editing the floor minimum (see _setpoints_for_mode), not the
+            # old occupied floor setpoint -- route edits there so the dial
+            # stays truthful about what it just displayed.
+            key = (
+                "gulv_min_temperatur"
+                if self._select("regulering") == "Rum (gulv min.)"
+                else "setpunkt_gulv_beboet"
+            )
+        else:
+            key = "setpunkt_rum_beboet"
         entity = self._numbers.get(key)
         if entity:
             await entity.async_set_native_value(value)
@@ -498,12 +509,22 @@ class RoomHeatingCoordinator:
 
         return base_mode
 
-    def _setpoints_for_mode(self, mode: str) -> tuple[float | None, float | None]:
+    def _setpoints_for_mode(self, mode: str, regulation: str) -> tuple[float | None, float | None]:
         if mode in (MODE_OFF, MODE_ALARM):
             return None, None
         if mode == MODE_OCCUPIED:
             room_sp = self._number("setpunkt_rum_beboet")
-            floor_sp = self._number("setpunkt_gulv_beboet")
+            # "Rum (gulv min.)": the floor isn't a regulation target here --
+            # it only ever needs to stay above its own minimum, regardless
+            # of the room's occupied setpoint. Only while occupied: the
+            # other house modes below (unoccupied/night/guest/frost) keep
+            # using their own shared, already-reduced setpoint for both
+            # sensors, same as every other regulation mode -- a frost-mode
+            # floor shouldn't be pulled back up to the comfort minimum.
+            if regulation == "Rum (gulv min.)":
+                floor_sp = self._number("gulv_min_temperatur")
+            else:
+                floor_sp = self._number("setpunkt_gulv_beboet")
         elif mode == MODE_UNOCCUPIED:
             room_sp = floor_sp = self._number("setpunkt_ubeboet")
         elif mode in (MODE_GUEST, MODE_NIGHT):
@@ -537,14 +558,20 @@ class RoomHeatingCoordinator:
         floor_temp = self._get_float(self.floor_temp_sensor) if self.floor_temp_sensor else None
 
         mode = self._determine_mode(room_temp, floor_temp)
-        room_sp, floor_sp = self._setpoints_for_mode(mode)
         regulation = self._select("regulering")
+        room_sp, floor_sp = self._setpoints_for_mode(mode, regulation)
         priority = self._select("prioritet")
         band = self._number("hysterese") or 0.3
         if regulation == "Gulv":
             trend_temp, trend_sp = floor_temp, floor_sp
             trend_entity_id = self.floor_temp_sensor
-        elif regulation == "Rum":
+        elif regulation in ("Rum", "Rum (gulv min.)"):
+            # "Rum (gulv min.)" always tracks the room sensor here too --
+            # every bit of this room's self-learning (still-rising/residual
+            # heat tracking just below, and from there adaptive bias plus
+            # the wind/sun duty refinement) runs off trend_temp, so the
+            # floor never feeds into any of it in this mode. The floor only
+            # gets to force a heat call via target_satisfied further down.
             trend_temp, trend_sp = room_temp, room_sp
             trend_entity_id = self.room_temp_sensor
         else:  # "Rum og gulv" -- track whichever sensor is actually driving
@@ -621,6 +648,13 @@ class RoomHeatingCoordinator:
                 target_satisfied = self._floor_satisfied
             elif regulation == "Rum":
                 target_satisfied = self._room_satisfied
+            elif regulation == "Rum (gulv min.)":
+                # Room decides start/stop as normal; floor_sp is now
+                # gulv_min_temperatur (see _setpoints_for_mode), so
+                # self._floor_satisfied only turns False -- forcing a heat
+                # call here regardless of the room -- once the floor has
+                # actually dropped below its own minimum.
+                target_satisfied = self._room_satisfied and self._floor_satisfied
             else:  # "Rum og gulv"
                 if priority == "Begge temperaturer opfyldt":
                     target_satisfied = self._room_satisfied and self._floor_satisfied
@@ -657,7 +691,11 @@ class RoomHeatingCoordinator:
             floor_near_target = floor_temp is None or floor_sp is None or not self._floor_far_over
             if regulation == "Gulv":
                 pulse_eligible = floor_near_target
-            elif regulation == "Rum":
+            elif regulation in ("Rum", "Rum (gulv min.)"):
+                # Pulsing is a room-only maintenance aid in this mode too --
+                # the floor's "far over its minimum" status is irrelevant
+                # to it (the floor is practically always far over a
+                # minimum that low), so it's not consulted here at all.
                 pulse_eligible = room_near_target
             elif priority == "Begge temperaturer opfyldt":
                 # Both sensors must reach setpoint+band before we're allowed
