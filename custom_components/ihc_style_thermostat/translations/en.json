@@ -61,7 +61,8 @@
       "pulsvarme_vind_faktor": { "name": "Pulse heating: wind duty top-up (auto-tuned)" },
       "sol_lav": { "name": "Pulse heating: sun factor, overcast threshold" },
       "sol_hoej": { "name": "Pulse heating: sun factor, bright threshold" },
-      "pulsvarme_sol_faktor": { "name": "Pulse heating: sun duty discount (auto-tuned)" }
+      "pulsvarme_sol_faktor": { "name": "Pulse heating: sun duty discount (auto-tuned)" },
+      "pulsvarme_gulv_kaskade_forstaerkning": { "name": "Floor cascade gain (regulation mode: Room, cascade via floor) (auto-tuned)" }
     },
     "select": {
       "regulering": { "name": "Regulation mode" },

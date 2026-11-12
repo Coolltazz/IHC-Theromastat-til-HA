@@ -30,7 +30,13 @@ HOUSE_MODE_MAP = {
     "Gæster": MODE_GUEST,
 }
 
-REGULATION_OPTIONS = ["Gulv", "Rum og gulv", "Rum", "Rum (gulv min.)"]
+REGULATION_OPTIONS = [
+    "Gulv",
+    "Rum og gulv",
+    "Rum",
+    "Rum (gulv min.)",
+    "Rum (kaskade via gulv)",
+]
 PRIORITY_OPTIONS = ["1 temperatur opfyldt", "Begge temperaturer opfyldt"]
 LOCAL_MODE_OPTIONS = [
     "Følger husets tilstand",
@@ -44,13 +50,20 @@ PULSVARME_OPTIONS = ["Aktiveret", "Ikke Aktiveret"]
 NUMBER_DEFS = {
     "setpunkt_rum_beboet": (21.0, 10.0, 30.0, 0.1, "°C", "mdi:home-thermometer"),
     "setpunkt_gulv_beboet": (24.0, 10.0, 35.0, 0.1, "°C", "mdi:heating-coil"),
-    # Only used by regulation mode "Rum (gulv min.)": the floor is not a
-    # regulation target in that mode at all -- it only forces a heat call
-    # if it ever drops below this value (with the usual hysteresis band),
-    # regardless of what the room is doing. Every other number/select in
-    # this file (pulse heating, adaptive bias, residual heat, wind/sun --
-    # see coordinator.py) only ever tracks the ROOM sensor in this mode, so
-    # none of that self-learning is influenced by the floor at all.
+    # Used by two regulation modes (see coordinator.py):
+    # - "Rum (gulv min.)": the floor is not a regulation target at all --
+    #   it only forces a heat call if it ever drops below this value (with
+    #   the usual hysteresis band), regardless of what the room is doing.
+    #   Pulse heating/adaptive bias/eftervarme/wind-sun all track the ROOM
+    #   sensor in this mode -- the floor plays no part in any of it.
+    # - "Rum (kaskade via gulv)": the lower clamp on the continuously
+    #   recomputed floor target (see pulsvarme_gulv_kaskade_forstaerkning
+    #   below and _cascade_floor_setpoint) -- the floor is never commanded
+    #   below this even if the room is comfortably over its own setpoint.
+    #   Here, pulse heating/eftervarme/wind-sun track the FLOOR sensor
+    #   against that moving target (the floor is the actual actuator), but
+    #   the cascade's own gain is tuned purely from the ROOM's stability --
+    #   see pulsvarme_gulv_kaskade_forstaerkning.
     "gulv_min_temperatur": (18.0, 5.0, 30.0, 0.1, "°C", "mdi:heating-coil"),
     "setpunkt_ubeboet": (17.0, 5.0, 25.0, 0.1, "°C", "mdi:home-minus"),
     "setpunkt_gaest_nat": (19.0, 5.0, 25.0, 0.1, "°C", "mdi:weather-night"),
@@ -124,6 +137,21 @@ NUMBER_DEFS = {
     # fell through anyway. Starts at 0 and only grows if sun actually
     # correlates with needing less heat.
     "pulsvarme_sol_faktor": (0.0, 0.0, 30.0, 0.1, "%", "mdi:weather-sunny"),
+    # Only used by regulation mode "Rum (kaskade via gulv)" (see
+    # coordinator.py _cascade_floor_setpoint / _adjust_kaskade_gain_from_room).
+    # How many degrees the floor's target setpoint shifts per degree the
+    # room currently sits away from ITS OWN setpoint -- room too cold
+    # raises the floor target (demand more heat into the slab), room at/
+    # over setpoint lowers it again, continuously, instead of the floor
+    # just sitting at one fixed number. Self-tuned purely from how stable
+    # the ROOM stays against its own setpoint: nudged up when the room
+    # sits below setpoint for a long stretch with floor headroom still
+    # left (cascade isn't pushing hard enough), nudged back down when the
+    # room swings into a comfortable overshoot (cascade pushed too hard).
+    # Starts conservative (0.5) rather than at 0, since a gain of 0 would
+    # make this mode behave exactly like a fixed floor setpoint with no
+    # room compensation at all -- defeating the point from the start.
+    "pulsvarme_gulv_kaskade_forstaerkning": (0.5, 0.0, 3.0, 0.05, "°C/°C", "mdi:chart-line-variant"),
 }
 
 # key -> (options, default, icon)

@@ -61,7 +61,8 @@
       "pulsvarme_vind_faktor": { "name": "Pulsvarme: vind-duty-tillæg (selvjusteres)" },
       "sol_lav": { "name": "Pulsvarme: solfaktor, overskyet-tærskel" },
       "sol_hoej": { "name": "Pulsvarme: solfaktor, klar-sol-tærskel" },
-      "pulsvarme_sol_faktor": { "name": "Pulsvarme: sol-duty-rabat (selvjusteres)" }
+      "pulsvarme_sol_faktor": { "name": "Pulsvarme: sol-duty-rabat (selvjusteres)" },
+      "pulsvarme_gulv_kaskade_forstaerkning": { "name": "Gulv-kaskade-forstærkning (regulering: Rum (kaskade via gulv)) (selvjusteres)" }
     },
     "select": {
       "regulering": { "name": "Reguleringsform" },
