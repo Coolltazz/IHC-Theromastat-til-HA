@@ -102,6 +102,16 @@ class RoomHeatingCoordinator:
         # residual-heat observation above while it's still settling.
         self._real_cycle_ended_at: float | None = None
 
+        # "Rum (kaskade via gulv)" gain self-tuning (see
+        # _adjust_kaskade_gain_from_room): time.monotonic() the room last
+        # dropped below setpoint-hysteresis (room_satisfied went False),
+        # None while it's satisfied. _kaskade_nudged_up_this_stretch makes
+        # the "sluggish -> nudge gain up" trigger fire at most once per
+        # continuous unsatisfied stretch rather than on every evaluate()
+        # call once the stretch has crossed the threshold.
+        self._kaskade_room_unsatisfied_since: float | None = None
+        self._kaskade_nudged_up_this_stretch: bool = False
+
         self._pulse_phase: str | None = None  # None / "on" / "off"
         # time.monotonic() when the current phase began -- enforces
         # pulsvarme_min_fase_min as a hard floor on how long a phase is
@@ -395,6 +405,93 @@ class RoomHeatingCoordinator:
         if entity.hass is not None:
             entity.async_write_ha_state()
 
+    def _adjust_kaskade_forstaerkning(self, delta: float) -> None:
+        """Nudges the learned cascade gain (percentage-point-style step,
+        clamped 0..3 -- see _cascade_floor_setpoint). Same direct-write
+        pattern as _adjust_bias, for the same re-entrancy reason."""
+        entity = self._numbers.get("pulsvarme_gulv_kaskade_forstaerkning")
+        if entity is None:
+            return
+        value = entity.native_value or 0.0
+        value = max(0.0, min(3.0, value + delta))
+        entity._attr_native_value = round(value, 2)  # noqa: SLF001 -- internal coordinator<->entity link
+        if entity.hass is not None:
+            entity.async_write_ha_state()
+
+    def _cascade_floor_setpoint(
+        self, base_floor_sp: float, room_temp: float, room_sp: float
+    ) -> float:
+        """"Rum (kaskade via gulv)": instead of a fixed floor target, the
+        floor setpoint is continuously nudged by how far the ROOM currently
+        sits from ITS OWN setpoint -- room too cold raises the floor's
+        target (demand more heat into the slab), room at/over setpoint
+        lowers it again. The floor's own hysteresis/pulse logic further
+        down (unchanged -- it just gets fed this as floor_sp instead of a
+        static number) then chases this moving target, which reacts far
+        faster and more evenly than toggling the relay straight off the
+        slow, high-mass room reading ever could.
+
+        base_floor_sp is "setpunkt_gulv_beboet" -- the neutral point this
+        oscillates around when the room is exactly at setpoint (error 0).
+        Clamped to gulv_min_temperatur..max_temp_gulv either way, same
+        safety floor/ceiling the other modes already respect."""
+        gain = self._number("pulsvarme_gulv_kaskade_forstaerkning")
+        if gain is None:
+            gain = 0.5
+        adjusted = base_floor_sp + gain * (room_sp - room_temp)
+        floor_min = self._number("gulv_min_temperatur")
+        if floor_min is None:
+            floor_min = 18.0
+        max_floor = self._number("max_temp_gulv")
+        if max_floor is not None:
+            adjusted = min(adjusted, max_floor)
+        return max(floor_min, adjusted)
+
+    def _adjust_kaskade_gain_from_room(
+        self,
+        room_satisfied: bool | None,
+        prev_far_over: bool | None,
+        far_over_now: bool | None,
+        floor_sp: float | None,
+    ) -> None:
+        """Self-tunes pulsvarme_gulv_kaskade_forstaerkning purely from how
+        the ROOM behaves against ITS OWN setpoint+hysteresis -- unlike every
+        other learned value in this file, the floor side is deliberately
+        NOT part of this signal at all (see _cascade_floor_setpoint for the
+        floor's own role as pure actuator). Two triggers:
+
+        - Room has sat below setpoint-hysteresis for a long, continuous
+          stretch (45 min) while the cascade-adjusted floor target still
+          has headroom below max_temp_gulv (so this isn't simply capacity-
+          limited): the cascade isn't pushing hard enough -- nudge the
+          gain up. Fires at most once per stretch, not every evaluate()
+          call during it.
+        - Room just swung from within-band into a comfortable overshoot
+          (far_over flipped False -> True): the cascade pushed harder than
+          it needed to -- ease the gain back a little. Reacts slower than
+          the sluggish case, same "react faster to cold than to warm"
+          asymmetry as the floor-only adaptive bias elsewhere in this
+          file."""
+        now = time.monotonic()
+        if room_satisfied is False:
+            if self._kaskade_room_unsatisfied_since is None:
+                self._kaskade_room_unsatisfied_since = now
+                self._kaskade_nudged_up_this_stretch = False
+            elif (
+                not self._kaskade_nudged_up_this_stretch
+                and now - self._kaskade_room_unsatisfied_since >= 45 * 60.0
+            ):
+                max_floor = self._number("max_temp_gulv")
+                if floor_sp is not None and max_floor is not None and floor_sp < max_floor:
+                    self._adjust_kaskade_forstaerkning(0.08)
+                self._kaskade_nudged_up_this_stretch = True
+        else:
+            self._kaskade_room_unsatisfied_since = None
+            self._kaskade_nudged_up_this_stretch = False
+
+        if prev_far_over is False and far_over_now is True:
+            self._adjust_kaskade_forstaerkning(-0.03)
+
     def _adjust_eftervarme(self, observed: float) -> None:
         """Blends a freshly observed residual-heat overshoot (degrees the
         primary sensor kept climbing after an ON phase ended) into the
@@ -560,9 +657,27 @@ class RoomHeatingCoordinator:
         mode = self._determine_mode(room_temp, floor_temp)
         regulation = self._select("regulering")
         room_sp, floor_sp = self._setpoints_for_mode(mode, regulation)
+        if (
+            regulation == "Rum (kaskade via gulv)"
+            and mode == MODE_OCCUPIED
+            and room_temp is not None
+            and room_sp is not None
+            and floor_sp is not None
+        ):
+            # Only while Occupied -- unoccupied/night/guest/frost keep
+            # using their own shared, already-reduced setpoint for both
+            # sensors untouched, same as every other regulation mode (see
+            # _setpoints_for_mode).
+            floor_sp = self._cascade_floor_setpoint(floor_sp, room_temp, room_sp)
         priority = self._select("prioritet")
         band = self._number("hysterese") or 0.3
-        if regulation == "Gulv":
+        if regulation in ("Gulv", "Rum (kaskade via gulv)"):
+            # "Rum (kaskade via gulv)": the floor is the actual actuator
+            # here (its own setpoint just got continuously nudged by the
+            # room's error above), so pulse heating/eftervarme/wind-sun all
+            # track the floor against that moving target, same shape as
+            # plain "Gulv" mode -- only the cascade's own gain (tuned
+            # further down) looks at the room at all.
             trend_temp, trend_sp = floor_temp, floor_sp
             trend_entity_id = self.floor_temp_sensor
         elif regulation in ("Rum", "Rum (gulv min.)"):
@@ -644,7 +759,12 @@ class RoomHeatingCoordinator:
                 floor_temp, floor_sp, band, self._floor_satisfied
             )
 
-            if regulation == "Gulv":
+            if regulation in ("Gulv", "Rum (kaskade via gulv)"):
+                # Cascade mode: the floor's own hysteresis against its
+                # (now dynamic) target is the heat-call decision, same
+                # shape as plain "Gulv" -- the room never gates target_satisfied
+                # directly here, it only steers floor_sp itself (above) and
+                # the gain (below).
                 target_satisfied = self._floor_satisfied
             elif regulation == "Rum":
                 target_satisfied = self._room_satisfied
@@ -675,6 +795,7 @@ class RoomHeatingCoordinator:
             # _hysteresis_satisfied with a pivot of setpoint+band, so it
             # takes a full extra band beyond that line before "far over"
             # latches, and a full band back below it before it releases.
+            prev_room_far_over = self._room_far_over
             self._room_far_over = self._hysteresis_satisfied(
                 room_temp,
                 room_sp + band if room_sp is not None else None,
@@ -687,9 +808,13 @@ class RoomHeatingCoordinator:
                 band,
                 self._floor_far_over,
             )
+            if regulation == "Rum (kaskade via gulv)" and mode == MODE_OCCUPIED:
+                self._adjust_kaskade_gain_from_room(
+                    self._room_satisfied, prev_room_far_over, self._room_far_over, floor_sp
+                )
             room_near_target = room_temp is None or room_sp is None or not self._room_far_over
             floor_near_target = floor_temp is None or floor_sp is None or not self._floor_far_over
-            if regulation == "Gulv":
+            if regulation in ("Gulv", "Rum (kaskade via gulv)"):
                 pulse_eligible = floor_near_target
             elif regulation in ("Rum", "Rum (gulv min.)"):
                 # Pulsing is a room-only maintenance aid in this mode too --

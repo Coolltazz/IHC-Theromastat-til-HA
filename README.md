@@ -86,18 +86,20 @@ Setpoints are always clamped down to the matching max-temperature limit if they'
 | Setpoint, frost protection | 7.0°C | Minimum target during frost protection or an open window — purely to avoid frost damage. |
 | Max temperature, room | 26.0°C | Hard safety ceiling — heat is forced off if the room reaches this, regardless of everything else. |
 | Max temperature, floor | 30.0°C | Same safety ceiling, for the floor. |
-| Floor minimum temperature | 18.0°C | Only used in regulation mode "Room (floor as minimum)" — see [Regulation & mode](#regulation--mode). Forces a heat call whenever the floor drops below this (with the usual hysteresis), independent of the room. Ignored by every other regulation mode. |
+| Floor minimum temperature | 18.0°C | Used by two regulation modes — see [Regulation & mode](#regulation--mode). In "Room (floor as minimum)": forces a heat call whenever the floor drops below this, independent of the room. In "Room (cascade via floor)": the lower clamp on the continuously-adjusted floor target. Ignored by every other regulation mode. |
 
 ### Regulation & mode
 
 | Entity | Default | Description |
 |---|---|---|
-| Regulation mode (select) | Room and floor | Floor / Room and floor / Room / **Room (floor as minimum)** — which sensor(s) drive the heat call and dial display. |
+| Regulation mode (select) | Room and floor | Floor / Room and floor / Room / Room (floor as minimum) / **Room (cascade via floor)** — which sensor(s) drive the heat call and dial display. |
 | Priority (select) | 1 temperature satisfied | Only relevant for "Room and floor": whether ONE sensor (OR) or BOTH sensors (AND) must reach setpoint+hysteresis before heat is considered satisfied. |
 | Hysteresis | 0.3°C | Deadband around the setpoint so the relay doesn't chatter on small fluctuations. |
 | Local override (select) | Follow house mode | Follow house mode / Forced off / Forced frost protection / Forced night setback — overrides the shared house mode for this room only. |
 
-**"Room (floor as minimum)"**: the room drives everything — the heat call, the dial, pulse heating, and *all* of its self-learning (adaptive bias, residual heat, the wind/sun duty terms below). The floor isn't a regulation target at all in this mode; it only forces a heat call, regardless of what the room is doing, if it ever drops below **Floor minimum temperature** (a separate entity from "Setpoint floor, occupied", only used by this mode — see [Setpoints](#setpoints)). Only while house mode is Occupied: unoccupied/night/guest/frost still use their own shared, already-reduced setpoint for both sensors, same as every other regulation mode.
+**"Room (floor as minimum)"**: the room drives everything — the heat call, the dial, pulse heating, and *all* of its self-learning (adaptive bias, residual heat, the wind/sun duty terms below). The floor isn't a regulation target at all in this mode; it only forces a heat call, regardless of what the room is doing, if it ever drops below **Floor minimum temperature** (a separate entity from "Setpoint floor, occupied", only used by this mode and by "Room (cascade via floor)" below — see [Setpoints](#setpoints)). Only while house mode is Occupied: unoccupied/night/guest/frost still use their own shared, already-reduced setpoint for both sensors, same as every other regulation mode.
+
+**"Room (cascade via floor)"**: for when keeping the *room* stable and close to its setpoint matters more than anything else, but the room sensor alone is too slow/laggy to drive the relay directly (common with a high-mass floor slab). Instead of a fixed floor target, **Setpoint floor, occupied** becomes the *neutral* point of a continuously recomputed floor target: `floor target = setpoint floor, occupied + gain × (room setpoint − room temperature)`, clamped between **Floor minimum temperature** and **Max temperature, floor**. Room too cold → the floor target is pushed up (demand more heat into the slab); room at/over its own setpoint → the floor target eases back down. The floor's own hysteresis and pulse heating then chase this moving target exactly as in plain "Floor" mode — so the actual relay control stays fast and stable, while the *target it's chasing* is what keeps the room itself in check. The `gain` is **Floor cascade gain**, below — self-tuned from how the room behaves against its own setpoint (nudged up if the room sits below setpoint for a long stretch while the floor target still has headroom, nudged down if the room swings into a comfortable overshoot), so you don't have to hand-tune it. Like the other room-driven mode, this only applies while house mode is Occupied.
 
 ### Pulse heating — basics
 
@@ -138,6 +140,7 @@ Two more values the coordinator tunes on its own; not normally meant for routine
 |---|---|---|
 | Adaptive bias | 0.0% | Added on top of the weather-curve duty% (and the wind/sun terms above). Nudged +3 when a cycle had to hand off to a full heat call (ran too cold), -1 when a cycle held comfortably on its own. |
 | Learned residual heat | 0.0°C | How many degrees the primary sensor typically keeps climbing after the relay closes (most pronounced on floor slabs with a lot of thermal mass). Only measured after a *real* heating cycle ends, never from pulse heating's own near-setpoint pulses (see the pause above) — used to end a pulse ON phase early so the residual rise lands on the setpoint instead of past it. |
+| Floor cascade gain | 0.5 °C/°C | Only used by "Room (cascade via floor)" — see [Regulation & mode](#regulation--mode). How many degrees the floor target shifts per degree of room error. Nudged up (+0.08) when the room sits below setpoint for 45+ minutes straight while the floor target still has headroom below its max; nudged down (−0.03) when the room swings into a comfortable overshoot. Tuned purely from the room's own behavior — the floor side never feeds into this. |
 
 ### Status (read-only)
 
