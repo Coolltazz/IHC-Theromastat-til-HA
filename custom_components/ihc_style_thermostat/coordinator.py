@@ -484,7 +484,7 @@ class RoomHeatingCoordinator:
             elif now - self._kaskade_room_unsatisfied_since >= 45 * 60.0:
                 max_floor = self._number("max_temp_gulv")
                 if floor_sp is not None and max_floor is not None and floor_sp < max_floor:
-                    self._adjust_kaskade_forstaerkning(0.08)
+                    self._adjust_kaskade_forstaerkning(0.5)
                 self._kaskade_room_unsatisfied_since = now
         else:
             self._kaskade_room_unsatisfied_since = None
