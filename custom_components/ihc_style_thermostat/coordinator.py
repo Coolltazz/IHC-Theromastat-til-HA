@@ -103,14 +103,15 @@ class RoomHeatingCoordinator:
         self._real_cycle_ended_at: float | None = None
 
         # "Rum (kaskade via gulv)" gain self-tuning (see
-        # _adjust_kaskade_gain_from_room): time.monotonic() the room last
-        # dropped below setpoint-hysteresis (room_satisfied went False),
-        # None while it's satisfied. _kaskade_nudged_up_this_stretch makes
-        # the "sluggish -> nudge gain up" trigger fire at most once per
-        # continuous unsatisfied stretch rather than on every evaluate()
-        # call once the stretch has crossed the threshold.
+        # _adjust_kaskade_gain_from_room): time.monotonic() of the start of
+        # the current "sluggish" window -- the room last dropped below
+        # setpoint-hysteresis (room_satisfied went False), or the last time
+        # a 45-minute nudge fired while still unsatisfied. None while the
+        # room is satisfied. This is re-armed (not latched) after each
+        # nudge so a long cold stretch keeps nudging the gain up every 45
+        # minutes instead of getting exactly one nudge for the whole
+        # stretch, however many hours it lasts.
         self._kaskade_room_unsatisfied_since: float | None = None
-        self._kaskade_nudged_up_this_stretch: bool = False
 
         self._pulse_phase: str | None = None  # None / "on" / "off"
         # time.monotonic() when the current phase began -- enforces
@@ -464,8 +465,12 @@ class RoomHeatingCoordinator:
           stretch (45 min) while the cascade-adjusted floor target still
           has headroom below max_temp_gulv (so this isn't simply capacity-
           limited): the cascade isn't pushing hard enough -- nudge the
-          gain up. Fires at most once per stretch, not every evaluate()
-          call during it.
+          gain up. Re-arms after firing, so a stretch that is still
+          unsatisfied 45 minutes later gets another nudge, and keeps
+          getting one every 45 minutes for as long as the room stays
+          cold -- rather than exactly one nudge for the whole stretch,
+          however many hours it runs, which left the gain unable to grow
+          out of a bad starting point during a single long cold spell.
         - Room just swung from within-band into a comfortable overshoot
           (far_over flipped False -> True): the cascade pushed harder than
           it needed to -- ease the gain back a little. Reacts slower than
@@ -476,18 +481,13 @@ class RoomHeatingCoordinator:
         if room_satisfied is False:
             if self._kaskade_room_unsatisfied_since is None:
                 self._kaskade_room_unsatisfied_since = now
-                self._kaskade_nudged_up_this_stretch = False
-            elif (
-                not self._kaskade_nudged_up_this_stretch
-                and now - self._kaskade_room_unsatisfied_since >= 45 * 60.0
-            ):
+            elif now - self._kaskade_room_unsatisfied_since >= 45 * 60.0:
                 max_floor = self._number("max_temp_gulv")
                 if floor_sp is not None and max_floor is not None and floor_sp < max_floor:
-                    self._adjust_kaskade_forstaerkning(0.08)
-                self._kaskade_nudged_up_this_stretch = True
+                    self._adjust_kaskade_forstaerkning(0.5)
+                self._kaskade_room_unsatisfied_since = now
         else:
             self._kaskade_room_unsatisfied_since = None
-            self._kaskade_nudged_up_this_stretch = False
 
         if prev_far_over is False and far_over_now is True:
             self._adjust_kaskade_forstaerkning(-0.03)
